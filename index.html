@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Flowgorithm Mini App</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<title>Blok-Sxema Mini App</title>
+<script src="[https://telegram.org/js/telegram-web-app.js](https://telegram.org/js/telegram-web-app.js)"></script>
 <style>
   :root {
     --bg: #0f172a;
@@ -40,16 +40,16 @@
     background: #1e293b;
     padding: 10px 14px;
     font-size: 13px;
-    line-height: 1.4;
+    line-height: 1.45;
     border-bottom: 1px solid #334155;
-    max-height: 85px;
+    max-height: 90px;
     overflow-y: auto;
-    color: #cbd5e1;
+    color: #e2e8f0;
   }
 
   .tabs { display: flex; background: #0f172a; border-bottom: 1px solid #334155; }
   .tab {
-    flex: 1; text-align: center; padding: 10px; font-size: 13px; font-weight: 600;
+    flex: 1; text-align: center; padding: 11px; font-size: 13px; font-weight: 600;
     color: #94a3b8; cursor: pointer; border-bottom: 2px solid transparent;
   }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: #1e293b50; }
@@ -66,7 +66,18 @@
     display: none; width: 100%; height: 100%; overflow: auto;
     background: #0f172a; padding: 16px; color: #e2e8f0;
   }
-  pre { background: #1e293b; padding: 14px; border-radius: 10px; overflow-x: auto; font-family: Consolas, monospace; font-size: 13px; line-height: 1.5; border: 1px solid #334155; }
+  .code-header {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
+  }
+  .copy-btn {
+    background: #1e293b; color: #38bdf8; border: 1px solid #38bdf8;
+    padding: 5px 12px; border-radius: 6px; font-size: 12px; cursor: pointer;
+  }
+  pre {
+    background: #1e293b; padding: 14px; border-radius: 10px; overflow-x: auto;
+    font-family: Consolas, 'Courier New', monospace; font-size: 14px;
+    line-height: 1.55; border: 1px solid #334155; color: #f8fafc;
+  }
 
   .floating-controls {
     position: absolute; bottom: 16px; right: 16px;
@@ -74,7 +85,7 @@
   }
   .fab {
     background: #1e293b; color: #fff; border: 1px solid #475569;
-    width: 40px; height: 40px; border-radius: 50%; font-size: 18px;
+    width: 42px; height: 42px; border-radius: 50%; font-size: 18px;
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer;
   }
@@ -96,21 +107,21 @@
 
 <div class="topbar">
   <select id="secSelect"></select>
-  <select id="numSelect" style="max-width: 95px;"></select>
-  <button class="btn-primary" onclick="loadFlowchart()">Chizish</button>
+  <select id="numSelect" style="max-width: 98px;"></select>
+  <button class="btn-primary" onclick="loadFlowchart(false)">Chizish</button>
 </div>
 
 <div class="problem-banner" id="probText">Masala yuklanmoqda...</div>
 
 <div class="tabs">
-  <div class="tab active" onclick="switchTab('flow', this)">📊 Flowgorithm Sxema</div>
-  <div class="tab" onclick="switchTab('code', this)">💻 Python Kod & Izoh</div>
+  <div class="tab active" onclick="switchTab('flow', this)">📊 Blok-Sxema</div>
+  <div class="tab" onclick="switchTab('code', this)">🐍 Python Kod & Izoh</div>
 </div>
 
 <div class="workspace">
   <div id="loader" class="loader">
     <div class="spinner"></div>
-    <div>Flowgorithm sxemasi chizilmoqda...</div>
+    <div>Blok-sxema chizilmoqda...</div>
   </div>
 
   <div id="canvas-container">
@@ -118,13 +129,17 @@
   </div>
 
   <div id="code-container">
-    <h4 style="color:#38bdf8; margin-bottom:8px;">📌 Algoritm izohi:</h4>
-    <p id="explanationText" style="margin-bottom:16px; font-size:14px; line-height:1.5; color:#cbd5e1;"></p>
-    <h4 style="color:#38bdf8; margin-bottom:8px;">🐍 Python dasturi:</h4>
+    <h4 style="color:#38bdf8; margin-bottom:8px;">📌 Algoritm tushuntirishi:</h4>
+    <p id="explanationText" style="margin-bottom:18px; font-size:14px; line-height:1.55; color:#cbd5e1;"></p>
+    <div class="code-header">
+      <h4 style="color:#38bdf8;">🐍 Python dasturi:</h4>
+      <button class="copy-btn" onclick="copyCode()">📋 Nusxalash</button>
+    </div>
     <pre><code id="pythonCode"></code></pre>
   </div>
 
   <div class="floating-controls" id="zoomControls">
+    <button class="fab" onclick="loadFlowchart(true)" title="Qayta generatsiya qilish">🔄</button>
     <button class="fab" onclick="zoom(0.15)" title="Yaqinlashtirish">➕</button>
     <button class="fab" onclick="zoom(-0.15)" title="Uzoqlashtirish">➖</button>
     <button class="fab" onclick="downloadPNG()" title="PNG rasm yuklab olish">💾</button>
@@ -140,7 +155,6 @@ let currentScale = 1;
 
 const COLORS = {
   terminal: { fill: "#f3e8ff", stroke: "#7e22ce", text: "#581c87" },
-  declare:  { fill: "#fef3c7", stroke: "#d97706", text: "#78350f" },
   assign:   { fill: "#fef9c3", stroke: "#ca8a04", text: "#713f12" },
   input:    { fill: "#e0f2fe", stroke: "#0284c7", text: "#0c4a6e" },
   output:   { fill: "#dcfce7", stroke: "#16a34a", text: "#14532d" },
@@ -169,7 +183,7 @@ async function init() {
 
   secSelect.addEventListener("change", () => populateNumbers(secSelect.value, "1"));
   populateNumbers(initSec, initNum);
-  await loadFlowchart();
+  await loadFlowchart(false);
 }
 
 function populateNumbers(sec, selectedNum) {
@@ -187,13 +201,13 @@ function populateNumbers(sec, selectedNum) {
   }
 }
 
-async function loadFlowchart() {
+async function loadFlowchart(force = false) {
   const sec = document.getElementById("secSelect").value;
   const num = document.getElementById("numSelect").value;
   document.getElementById("loader").style.display = "flex";
 
   try {
-    const res = await fetch(`/api/flowchart?sec=${sec}&num=${num}`);
+    const res = await fetch(`/api/flowchart?sec=${sec}&num=${num}&force=${force ? 1 : 0}`);
     const json = await res.json();
     if (json.status !== "ok") throw new Error(json.message);
 
@@ -202,9 +216,10 @@ async function loadFlowchart() {
     document.getElementById("explanationText").textContent = data.explanation || "";
     document.getElementById("pythonCode").textContent = data.code_python || "# Kod mavjud emas";
 
+    const cleanNodes = (data.nodes || []).filter(n => n.type !== "declare");
     const fullNodes = [
       { type: "terminal", text: "Boshlash" },
-      ...(data.nodes || []),
+      ...cleanNodes,
       { type: "terminal", text: "Tugash" }
     ];
     const svgString = renderFlowgorithmSVG(fullNodes);
@@ -218,10 +233,38 @@ async function loadFlowchart() {
   }
 }
 
-const NODE_W = 190;
-const NODE_H = 52;
+function copyCode() {
+  const code = document.getElementById("pythonCode").textContent;
+  navigator.clipboard.writeText(code);
+  const btn = document.querySelector(".copy-btn");
+  btn.textContent = "✅ Nusxalandi!";
+  setTimeout(() => btn.textContent = "📋 Nusxalash", 2000);
+}
+
+// ================= SO'ZNI BO'LIB YUBORMAYDIGAN MATN FUNKSIYASI =================
+function wrapWords(text, maxChars = 26) {
+  const words = String(text || "").trim().split(/\s+/);
+  const lines = [];
+  let current = "";
+  for (const w of words) {
+    if (!current) {
+      current = w;
+    } else if ((current + " " + w).length <= maxChars) {
+      current += " " + w;
+    } else {
+      lines.push(current);
+      current = w;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length ? lines : [""];
+}
+
+// ================= GRAFIK MOTOR =================
+const NODE_W = 220;
+const NODE_H = 54;
 const V_GAP = 36;
-const H_GAP = 55;
+const H_GAP = 60;
 
 function measureSequence(nodes) {
   let width = NODE_W + 40;
@@ -243,17 +286,17 @@ function measureNode(node) {
   if (t === "if") {
     const tSeq = measureSequence(node.trueBranch || []);
     const fSeq = measureSequence(node.falseBranch || []);
-    const leftW = Math.max(tSeq.width, NODE_W / 2 + 30);
-    const rightW = Math.max(fSeq.width, NODE_W / 2 + 30);
+    const leftW = Math.max(tSeq.width, NODE_W / 2 + 40);
+    const rightW = Math.max(fSeq.width, NODE_W / 2 + 40);
     const totalW = leftW + rightW + H_GAP;
-    const branchH = Math.max(tSeq.height, fSeq.height, 40);
-    const totalH = 74 + V_GAP + branchH + V_GAP + 16;
+    const branchH = Math.max(tSeq.height, fSeq.height, 36);
+    const totalH = 76 + V_GAP + branchH + 24;
     return { type: "if", node, tSeq, fSeq, leftW, rightW, branchH, width: totalW, height: totalH };
   }
   if (t === "while" || t === "for" || t === "loop") {
     const bodySeq = measureSequence(node.body || []);
-    const totalW = Math.max(NODE_W + 80, bodySeq.width + 90);
-    const totalH = 64 + V_GAP + bodySeq.height + V_GAP + 24;
+    const totalW = Math.max(NODE_W + 90, bodySeq.width + 100);
+    const totalH = 62 + V_GAP + bodySeq.height + 34;
     return { type: "loop", node, bodySeq, width: totalW, height: totalH };
   }
   return { type: t, node, width: NODE_W + 40, height: NODE_H };
@@ -261,30 +304,25 @@ function measureNode(node) {
 
 function renderFlowgorithmSVG(nodes) {
   const tree = measureSequence(nodes);
-  const svgW = Math.max(tree.width + 80, 360);
+  const svgW = Math.max(tree.width + 80, 380);
   const svgH = tree.height + 80;
   let out = [];
 
-  function drawArrow(x1, y1, x2, y2, label = "") {
-    out.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>`);
-    if (label) {
-      out.push(`<text x="${(x1+x2)/2}" y="${y1 - 6}" text-anchor="middle" font-size="12" font-weight="bold" fill="#0f172a">${esc(label)}</text>`);
-    }
+  function drawArrow(x1, y1, x2, y2) {
+    out.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#334155" stroke-width="2.2" marker-end="url(#arrow)"/>`);
   }
 
-  function drawLine(x1, y1, x2, y2, dashed = false) {
-    const d = dashed ? `stroke-dasharray="5,4"` : "";
-    out.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#334155" stroke-width="2" ${d}/>`);
+  function drawLine(x1, y1, x2, y2) {
+    out.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#334155" stroke-width="2.2"/>`);
   }
 
-  function drawText(cx, cy, text, color) {
-    const str = String(text || "");
-    const lines = str.length > 24 ? [str.slice(0, 24), str.slice(24, 48)] : [str];
+  function drawText(cx, cy, text, color, maxChars = 26) {
+    const lines = wrapWords(text, maxChars);
     if (lines.length === 1) {
-      out.push(`<text x="${cx}" y="${cy + 5}" text-anchor="middle" font-size="13" font-weight="600" fill="${color}">${esc(lines[0])}</text>`);
+      out.push(`<text x="${cx}" y="${cy + 5}" text-anchor="middle" font-size="13.5" font-weight="600" fill="${color}">${esc(lines[0])}</text>`);
     } else {
-      out.push(`<text x="${cx}" y="${cy - 3}" text-anchor="middle" font-size="12" font-weight="600" fill="${color}">${esc(lines[0])}</text>`);
-      out.push(`<text x="${cx}" y="${cy + 14}" text-anchor="middle" font-size="12" font-weight="600" fill="${color}">${esc(lines[1])}</text>`);
+      out.push(`<text x="${cx}" y="${cy - 3}" text-anchor="middle" font-size="12.5" font-weight="600" fill="${color}">${esc(lines[0])}</text>`);
+      out.push(`<text x="${cx}" y="${cy + 14}" text-anchor="middle" font-size="12.5" font-weight="600" fill="${color}">${esc(lines.slice(1).join(" "))}</text>`);
     }
   }
 
@@ -307,96 +345,94 @@ function renderFlowgorithmSVG(nodes) {
 
     if (m.type === "terminal") {
       const c = COLORS.terminal;
-      out.push(`<rect x="${x}" y="${y}" width="${NODE_W}" height="${NODE_H}" rx="26" ry="26" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2.2"/>`);
-      drawText(cx, cy, m.node.text, c.text);
-    }
-    else if (m.type === "declare") {
-      const c = COLORS.declare;
-      out.push(`<rect x="${x}" y="${y}" width="${NODE_W}" height="${NODE_H}" rx="4" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2.2"/>`);
-      out.push(`<line x1="${x+10}" y1="${y}" x2="${x+10}" y2="${y+NODE_H}" stroke="${c.stroke}" stroke-width="1.8"/>`);
-      out.push(`<line x1="${x}" y1="${y+8}" x2="${x+NODE_W}" y2="${y+8}" stroke="${c.stroke}" stroke-width="1.8"/>`);
-      drawText(cx + 4, cy + 3, m.node.text, c.text);
+      out.push(`<rect x="${x + 25}" y="${y}" width="${NODE_W - 50}" height="${NODE_H - 6}" rx="24" ry="24" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2.3"/>`);
+      drawText(cx, y + (NODE_H - 6)/2, m.node.text, c.text);
     }
     else if (m.type === "input" || m.type === "output") {
       const c = m.type === "input" ? COLORS.input : COLORS.output;
-      const sk = 16;
+      const sk = 18;
       const pts = `${x+sk},${y} ${x+NODE_W},${y} ${x+NODE_W-sk},${y+NODE_H} ${x},${y+NODE_H}`;
-      out.push(`<polygon points="${pts}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2.2"/>`);
+      out.push(`<polygon points="${pts}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2.3"/>`);
       drawText(cx, cy, m.node.text, c.text);
     }
     else if (m.type === "if") {
       const c = COLORS.if;
-      const dh = 74;
-      const dw = NODE_W + 20;
+      const dh = 76;
+      const dw = NODE_W + 30;
       const dcy = y + dh / 2;
       const pts = `${cx},${y} ${cx+dw/2},${dcy} ${cx},${y+dh} ${cx-dw/2},${dcy}`;
-      out.push(`<polygon points="${pts}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2.2"/>`);
-      drawText(cx, dcy, m.node.condition || m.node.text, c.text);
+      out.push(`<polygon points="${pts}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2.3"/>`);
+      drawText(cx, dcy, m.node.condition || m.node.text, c.text, 22);
 
       const leftCx = cx - H_GAP / 2 - m.leftW / 2;
       const rightCx = cx + H_GAP / 2 + m.rightW / 2;
       const branchStartY = y + dh + V_GAP;
       const mergeY = y + m.height;
 
+      // Ha tarmog'i (Chap)
       drawLine(cx - dw / 2, dcy, leftCx, dcy);
       out.push(`<text x="${(cx - dw/2 + leftCx)/2}" y="${dcy - 7}" text-anchor="middle" font-size="12" font-weight="bold" fill="#15803d">Ha</text>`);
       if (m.tSeq.items.length > 0) {
         drawArrow(leftCx, dcy, leftCx, branchStartY);
         renderSeq(m.tSeq, leftCx, branchStartY);
-        drawLine(leftCx, branchStartY + m.tSeq.height, leftCx, mergeY - 8);
+        drawLine(leftCx, branchStartY + m.tSeq.height, leftCx, mergeY);
       } else {
-        drawLine(leftCx, dcy, leftCx, mergeY - 8);
+        drawLine(leftCx, dcy, leftCx, mergeY);
       }
 
+      // Yo'q tarmog'i (O'ng)
       drawLine(cx + dw / 2, dcy, rightCx, dcy);
       out.push(`<text x="${(cx + dw/2 + rightCx)/2}" y="${dcy - 7}" text-anchor="middle" font-size="12" font-weight="bold" fill="#b91c1c">Yo'q</text>`);
       if (m.fSeq.items.length > 0) {
         drawArrow(rightCx, dcy, rightCx, branchStartY);
         renderSeq(m.fSeq, rightCx, branchStartY);
-        drawLine(rightCx, branchStartY + m.fSeq.height, rightCx, mergeY - 8);
+        drawLine(rightCx, branchStartY + m.fSeq.height, rightCx, mergeY);
       } else {
-        drawLine(rightCx, dcy, rightCx, mergeY - 8);
+        drawLine(rightCx, dcy, rightCx, mergeY);
       }
 
-      drawLine(leftCx, mergeY - 8, rightCx, mergeY - 8);
-      out.push(`<circle cx="${cx}" cy="${mergeY - 8}" r="4" fill="#334155"/>`);
-      drawLine(cx, mergeY - 8, cx, mergeY);
+      // Pastki birlashish chizig'i
+      drawLine(leftCx, mergeY, rightCx, mergeY);
+      out.push(`<circle cx="${cx}" cy="${mergeY}" r="4" fill="#334155"/>`);
     }
     else if (m.type === "loop") {
       const c = COLORS.loop;
-      const lh = 64;
-      const lw = NODE_W + 20;
+      const lh = 62;
+      const lw = NODE_W + 26;
       const lcy = y + lh / 2;
       const pts = `${cx-lw/2+18},${y} ${cx+lw/2-18},${y} ${cx+lw/2},${lcy} ${cx+lw/2-18},${y+lh} ${cx-lw/2+18},${y+lh} ${cx-lw/2},${lcy}`;
-      out.push(`<polygon points="${pts}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2.2"/>`);
-      drawText(cx, lcy, m.node.condition || m.node.text, c.text);
+      out.push(`<polygon points="${pts}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2.3"/>`);
+      drawText(cx, lcy, m.node.condition || m.node.text, c.text, 25);
 
       const bodyStartY = y + lh + V_GAP;
       const bodyEndY = bodyStartY + m.bodySeq.height;
       const bottomY = y + m.height;
 
+      // Sikl ichiga kirish
       drawArrow(cx, y + lh, cx, bodyStartY);
-      out.push(`<text x="${cx + 16}" y="${y + lh + 18}" font-size="11" font-weight="bold" fill="#15803d">Ha</text>`);
+      out.push(`<text x="${cx + 16}" y="${y + lh + 18}" font-size="11.5" font-weight="bold" fill="#15803d">Ha</text>`);
       if (m.bodySeq.items.length > 0) {
         renderSeq(m.bodySeq, cx, bodyStartY);
       }
 
-      const leftLoopX = cx - m.width / 2 + 16;
+      // Chap tomondan sikl boshiga qaytish
+      const leftLoopX = cx - m.width / 2 + 18;
       drawLine(cx, bodyEndY, cx, bodyEndY + 14);
       drawLine(cx, bodyEndY + 14, leftLoopX, bodyEndY + 14);
       drawLine(leftLoopX, bodyEndY + 14, leftLoopX, lcy);
       drawArrow(leftLoopX, lcy, cx - lw / 2, lcy);
 
-      const rightExitX = cx + m.width / 2 - 16;
+      // O'ng tomondan sikldan chiqish (Yo'q)
+      const rightExitX = cx + m.width / 2 - 18;
       drawLine(cx + lw / 2, lcy, rightExitX, lcy);
-      out.push(`<text x="${cx + lw/2 + 20}" y="${lcy - 6}" font-size="11" font-weight="bold" fill="#b91c1c">Yo'q</text>`);
-      drawLine(rightExitX, lcy, rightExitX, bottomY - 6);
-      drawLine(rightExitX, bottomY - 6, cx, bottomY - 6);
-      drawLine(cx, bottomY - 6, cx, bottomY);
+      out.push(`<text x="${cx + lw/2 + 22}" y="${lcy - 6}" font-size="11.5" font-weight="bold" fill="#b91c1c">Yo'q</text>`);
+      drawLine(rightExitX, lcy, rightExitX, bottomY);
+      drawLine(rightExitX, bottomY, cx, bottomY);
+      out.push(`<circle cx="${cx}" cy="${bottomY}" r="4" fill="#334155"/>`);
     }
     else {
       const c = COLORS.assign;
-      out.push(`<rect x="${x}" y="${y}" width="${NODE_W}" height="${NODE_H}" rx="4" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2.2"/>`);
+      out.push(`<rect x="${x}" y="${y}" width="${NODE_W}" height="${NODE_H}" rx="6" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2.3"/>`);
       drawText(cx, cy, m.node.text, c.text);
     }
   }
@@ -404,7 +440,7 @@ function renderFlowgorithmSVG(nodes) {
   renderSeq(tree, svgW / 2, 30);
 
   return `
-    <svg id="flow-svg" xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
+    <svg id="flow-svg" xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M 0 1 L 10 5 L 0 9 z" fill="#334155"/>
@@ -460,7 +496,7 @@ function downloadPNG() {
     const a = document.createElement("a");
     const sec = document.getElementById("secSelect").value;
     const num = document.getElementById("numSelect").value;
-    a.download = `Flowgorithm_${sec}_${num}.png`;
+    a.download = `BlokSxema_${sec}_${num}.png`;
     a.href = canvas.toDataURL("image/png");
     a.click();
   };
