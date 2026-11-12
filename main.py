@@ -15,11 +15,10 @@ from google.genai import types as genai_types
 BOT_TOKEN = os.getenv("BOT_TOKEN", "BOT_TOKENINGIZNI_SHU_YERGA_YOZING")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "GEMINI_API_KEYINGIZNI_SHU_YERGA_YOZING")
 
-# Render o'zi avtomatik RENDER_EXTERNAL_URL beradi, yoki WEBAPP_URL ishlatiladi
 WEBAPP_URL = (
     os.getenv("WEBAPP_URL")
     or os.getenv("RENDER_EXTERNAL_URL")
-    or "https://sizning-loyihangiz.onrender.com"
+    or "https://algoritm-03.onrender.com"
 ).rstrip("/")
 
 PDF_PATH = os.getenv("PDF_PATH", "BLACKCURSE.pdf")
@@ -27,7 +26,12 @@ PORT = int(os.getenv("PORT", 8080))
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+
+# v1beta API versiyasini majburiy ko'rsatamiz
+gemini_client = genai.Client(
+    api_key=GEMINI_API_KEY,
+    http_options={"api_version": "v1beta"}
+)
 
 PROBLEMS_DB = {}
 FLOWCHART_CACHE = {}
@@ -44,7 +48,6 @@ SECTION_NAMES = {
 
 # ================= PDF PARSER =================
 def load_problems_from_pdf(pdf_path: str):
-    """BLACKCURSE.pdf ichidagi barcha §-5.1 .. §-5.7 masalalarini avtomatik ajratib oladi"""
     if not os.path.exists(pdf_path):
         print(f"DIQQAT: {pdf_path} topilmadi! Standart holatda ishlaydi.")
         return
@@ -85,7 +88,7 @@ def load_problems_from_pdf(pdf_path: str):
 # ================= AI GENERATOR (FLOWGORITHM DARAJASIDA) =================
 SYSTEM_PROMPT = """
 Sen Flowgorithm dasturi uchun xatosiz blok-sxema (AST daraxt) tuzuvchi algoritmik dvijoksan.
-Berilgan matematik/algoritmik masala uchun Flowgorithm qoidalariga 100% mos JSON qaytar.
+Berilgan matematik/algoritmik masala uchun Flowgorithm qoidalariga 100% mos sof JSON qaytar (markdown ```json belgisiz).
 
 QAT'IY QOIDALAR:
 1. O'zgaruvchilar ishlatilishidan oldin "declare" blokida e'lon qilinishi shart (Masalan: "Butun son: n, i, s").
@@ -121,25 +124,37 @@ JSON FORMATI:
 }
 """
 
+def clean_json_text(raw_text: str) -> str:
+    text = raw_text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
 async def generate_flowchart_ast(sec: str, num: str) -> dict:
     cache_key = f"{sec}_{num}"
     if cache_key in FLOWCHART_CACHE:
         return FLOWCHART_CACHE[cache_key]
 
     prob_text = PROBLEMS_DB.get(sec, {}).get(num, f"§-{sec} bo'lim, {num}-masala.")
-    prompt = f"Bo'lim: {SECTION_NAMES.get(sec, sec)}\nMasala #{num}: {prob_text}\n\nUshbu masalaning to'liq, xatosiz Flowgorithm blok-sxema JSON strukturasini tuzib ber."
+    full_prompt = (
+        f"{SYSTEM_PROMPT}\n\n"
+        f"Bo'lim: {SECTION_NAMES.get(sec, sec)}\n"
+        f"Masala #{num}: {prob_text}\n\n"
+        f"Ushbu masalaning to'liq, xatosiz Flowgorithm blok-sxema JSON strukturasini qaytar:"
+    )
 
     response = await asyncio.to_thread(
         gemini_client.models.generate_content,
         model="gemini-2.5-flash",
-        contents=prompt,
+        contents=full_prompt,
         config=genai_types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
             response_mime_type="application/json",
             temperature=0.1
         )
     )
-    data = json.loads(response.text)
+    cleaned = clean_json_text(response.text)
+    data = json.loads(cleaned)
     data["problem_text"] = prob_text
     FLOWCHART_CACHE[cache_key] = data
     return data
