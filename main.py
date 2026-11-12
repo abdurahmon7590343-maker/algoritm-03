@@ -84,32 +84,30 @@ def load_problems_from_pdf(pdf_path: str):
 
     print(f"PDF muvaffaqiyatli o'qildi! Bo'limlar soni: {len(PROBLEMS_DB)}")
 
-# ================= TOZA O'ZBEKCHA ALGORITM VA KOD GENERATORI =================
+# ================= AI GENERATOR =================
 SYSTEM_PROMPT = """
 Sen universitet talabalari uchun klassik o'zbekcha blok-sxema va eng sodda, odamdek tushunarli Python dastur tuzuvchi ustozsan.
 Berilgan masala uchun faqat sof JSON qaytar.
 
-ENG QAT'IY QOIDALAR (BUZISH TAQIQLANADI):
-1. INGLIZCHA SO'ZLAR TAQIQLANADI: "count", "max_coord", "R_squared", "floor", "result", "temp", "flag", "is_prime" kabi inglizcha nomlarni UMUMAN ISHLATMA!
-2. QISQA MATEMATIK O'ZGARUVCHILAR ISHLAT: faqat `n`, `m`, `k`, `s`, `i`, `j`, `a`, `b`, `c`, `x`, `y`, `R`, `p`, `q` kabi 1 harfli matematik o'zgaruvchilarni ishlat!
+ENG QAT'IY QOIDALAR:
+1. INGLIZCHA SO'ZLAR TAQIQLANADI: "count", "max_coord", "R_squared", "floor", "result" kabi inglizcha nomlarni UMUMAN ISHLATMA!
+2. QISQA MATEMATIK O'ZGARUVCHILAR ISHLAT: faqat `n`, `m`, `k`, `s`, `i`, `j`, `a`, `b`, `c`, `x`, `y`, `R` kabi 1 harfli matematik o'zgaruvchilarni ishlat!
 3. "declare" (E'lon qilish) BLOKINI UMUMAN QO'SHMA! Blok-sxema to'g'ridan-to'g'ri "input" (Kiritish) blokidan boshlansin.
-4. BLOK ICHIDAGI YOZUVLAR QISQA BO'LSIN (ko'pi bilan 22 ta belgi):
-   - Kiritish bloki ("input"): `"Kiritish: R"` yoki `"Kiritish: n"`
-   - Hisoblash bloki ("assign"): `"m = int(R), s = 0"` yoki `"s = s + 1"`
-   - Sikl bloki ("for" yoki "while"): Parametrli siklni `"x = -m dan m gacha"` yoki `"i = 1 dan n gacha"` deb yoz. Shartli sikl bo'lsa `"n > 0"` deb yoz.
-   - Shart bloki ("if"): `"x*x + y*y <= R*R"` yoki `"a*a + b*b == c*c"` (ortiqcha o'zgaruvchi ochmasdan to'g'ridan-to'g'ri shartni yoz!).
-   - Chiqarish bloki ("output"): `"Chiqarish: s"` yoki `"Chiqarish: a, b, c"`
-5. PYTHON KODI QOIDALARI:
-   - Kod xuddi a'lochi talaba qo'lda yozganidek eng sodda, toza va qisqa bo'lsin.
-   - `import math`, `def`, `list comprehension`, `lambda`, `max_coord` kabi murakkab va sun'iy narsalarni ISHLATMA.
-   - Oddiy `int(input("n = "))`, `for i in range(1, n + 1):`, `if ...:`, `print("Natija:", s)` orqali yoz.
-   - Izohlar (`explanation`) toza, ravon o'zbek tilida bo'lsin.
+4. BLOK ICHIDAGI YOZUVLAR QISQA BO'LSIN:
+   - Kiritish: `"Kiritish: R"` yoki `"Kiritish: n"`
+   - O'zlashtirish: `"m = int(R), s = 0"` yoki `"s = s + 1"`
+   - Sikl: `"x = -m dan m gacha"` yoki `"i = 1 dan n gacha"`
+   - Shart: `"x*x + y*y <= R*R"` yoki `"a*a + b*b == c*c"`
+   - Chiqarish: `"Chiqarish: s"` yoki `"Chiqarish: a, b, c"`
+5. PYTHON KODI:
+   - Kod juda sodda, toza va tushunarli bo'lsin. Murakkab funksiyalarsiz.
+   - Izohlar toza o'zbek tilida bo'lsin.
 
 NAMUNA:
 {
   "title": "§-5.1. 22-masala",
-  "explanation": "Markazi koordinata boshida va radiusi R ga teng doira ichida yotuvchi butun koordinatali (x, y) nuqtalarni sanaymiz. Buning uchun x va y ni -m dan m gacha (m = int(R)) o'zgartirib, x*x + y*y <= R*R shartni tekshiramiz.",
-  "code_python": "R = float(input(\\"R = \\"))\\nm = int(R)\\ns = 0\\n\\nfor x in range(-m, m + 1):\\n    for y in range(-m, m + 1):\\n        if x * x + y * y <= R * R:\\n            s += 1\\n\\nprint(\\"Ko'chatlar soni:\\", s)",
+  "explanation": "Markazi koordinata boshida va radiusi R ga teng doira ichida yotuvchi butun koordinatali (x, y) nuqtalarni sanaymiz.",
+  "code_python": "R = float(input(\\"R = \\"))\\nm = int(R)\\ns = 0\\n\\nfor x in range(-m, m + 1):\\n    for y in range(-m, m + 1):\\n        if x * x + y * y <= R * R:\\n            s += 1\\n\\nprint(\\"Natija:\\", s)",
   "nodes": [
     {"type": "input", "text": "Kiritish: R"},
     {"type": "assign", "text": "m = int(R), s = 0"},
@@ -155,7 +153,7 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
         f"{SYSTEM_PROMPT}\n\n"
         f"Bo'lim: {SECTION_NAMES.get(sec, sec)}\n"
         f"Masala #{num}: {prob_text}\n\n"
-        f"Ushbu masalaning eng sodda, inglizcha so'zlarsiz, xatosiz blok-sxema JSON strukturasini va toza Python kodini qaytar:"
+        f"Ushbu masalaning inglizcha so'zlarsiz, xatosiz blok-sxema JSON strukturasini va toza Python kodini qaytar:"
     )
 
     response = await asyncio.to_thread(
@@ -175,7 +173,7 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
     FLOWCHART_CACHE[cache_key] = data
     return data
 
-# ================= MINI APP HTML KODI (ICHIDA TAYYOR) =================
+# ================= MINI APP HTML KODI =================
 INDEX_HTML = """<!DOCTYPE html>
 <html lang="uz">
 <head>
@@ -331,6 +329,12 @@ tg.expand();
 let allProblems = {};
 let currentScale = 1;
 
+// Global o'lcham va ranglar
+const NODE_W = 220;
+const NODE_H = 54;
+const V_GAP = 36;
+const H_GAP = 60;
+
 const COLORS = {
   terminal: { fill: "#f3e8ff", stroke: "#7e22ce", text: "#581c87" },
   assign:   { fill: "#fef9c3", stroke: "#ca8a04", text: "#713f12" },
@@ -436,11 +440,6 @@ function wrapWords(text, maxChars = 26) {
   if (current) lines.push(current);
   return lines.length ? lines : [""];
 }
-
-const NODE_W = 220;
-const NODE_H = 54;
-const V_GAP = 36;
-const H_GAP = 60;
 
 function measureSequence(nodes) {
   let width = NODE_W + 40;
@@ -750,7 +749,7 @@ async def cb_problem(callback: types.CallbackQuery):
         parse_mode="HTML"
     )
 
-# ================= WEB SERVER (MINI APP API) =================
+# ================= WEB SERVER =================
 async def handle_index(request):
     return web.Response(text=INDEX_HTML, content_type="text/html")
 
