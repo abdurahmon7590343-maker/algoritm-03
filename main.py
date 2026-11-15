@@ -322,8 +322,18 @@ async def main():
     await site.start()
     print(f"Web-server http://0.0.0.0:{PORT} da ishga tushdi! WEBAPP_URL: {WEBAPP_URL}")
 
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    # Telegram bilan bog'lanishda xato bo'lsa (masalan, eski nusxa hali ishlayotgan bo'lsa)
+    # veb-server o'chib qolmasin: 10 soniyadan keyin qayta uriniladi.
+    while True:
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            await dp.start_polling(bot)
+            break
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"Polling xatosi: {type(e).__name__}: {e}. 10 soniyadan keyin qayta uriniladi...")
+            await asyncio.sleep(10)
 
 if __name__ == "__main__":
     asyncio.run(main())
