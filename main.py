@@ -121,8 +121,8 @@ def clean_json_text(raw_text: str) -> str:
 
 # AI faqat Python kodi va tushuntirish yozadi. Blok-sxema shu koddan
 # flowchart_builder.code_to_nodes() yordamida aniq quriladi.
-SYSTEM_PROMPT = """
-Sen universitet talabalari uchun eng sodda, odamdek tushunarli Python dasturlarini yozuvchi ustozsan.
+SYSTEM_PROMPT = r"""
+Sen universitet talabalari uchun Flowgorithm blok-sxemasiga aynan mos keladigan, eng sodda Python dasturlarini yozuvchi ustozsan.
 Berilgan masalani TO'G'RI va TEZ ishlaydigan qilib yechadigan dastur yoz va faqat sof JSON qaytar:
 {"explanation": "...", "input_format": "...", "test_input": "...", "code_python": "..."}
 
@@ -131,34 +131,39 @@ n! — faktorial, ≤ ≥ — taqqoslash. Masala shartini ehtiyotkorlik bilan o'
 
 QAT'IY QOIDALAR:
 1. Dastur TO'LIQ bo'lsin: kiritish, hisoblash va chiqarish (print). Masalaning BARCHA bandlarini (a, b, c ...) bajar.
-2. FAQAT bitta oddiy dastur: funksiyalar (def), klasslar, lambda, list comprehension ISHLATMA.
-   Faqat oddiy for / while / if / elif / else, o'zlashtirish va print ishlat.
+2. HAR BIR QATORDA FAQAT BITTA AMAL (blok-sxemadagi bitta blok kabi): bitta input, bitta o'zlashtirish, bitta print.
+   Ruxsat: oddiy for / while / if / elif / else, o'zlashtirish (=, +=), arifmetika (+ - * / // % **), taqqoslash, and/or/not, print, input, int(), float().
+   TAQIQ: def, class, lambda, list comprehension, kesim (a[::-1], a[1:3]), `a, b = b, a` kabi bir vaqtdagi o'zlashtirish,
+   `a = b = 0` kabi zanjirli o'zlashtirish, str() bilan raqamlarni ajratish, .split(), list(map(...)), True/False, while True,
+   .append (faqat matritsa satrini e'lon qilishdan tashqari), len(), sum(), max(), min(), sort(), sorted(), range ichida murakkab ifoda.
+   Qiymatlarni almashtirish uchun qo'shimcha o'zgaruvchi ishlat: t = a, a = b, b = t (har biri alohida qatorda).
+   Mantiqiy belgi (flag) uchun True/False o'rniga 1 va 0 ishlat. Cheksiz sikl o'rniga shart bilan while yoz.
 3. KUTUBXONA: odatda import KERAK EMAS. Faqat zarur bo'lsa (sin, cos, sqrt, pi, acos kabilar uchun) `from math import ...` ishlat.
-4. O'ZGARUVCHILAR: qisqa matematik nomlar: n, m, k, s, i, j, a, b, c, d, x, y, p, q, R, A, B. Inglizcha uzun nomlar (count, result, max_value) TAQIQLANADI.
-5. KIRITISH: HAR BIR input() da albatta qisqa YOZUV (prompt) bo'lsin, aks holda dastur jim turib qolgandek ko'rinadi:
-   `n = int(input("n = "))`, `x = float(input("x = "))`,
-   massiv: `a = list(map(int, input("a massivi (probel bilan): ").split()))`,
-   matritsa: avval o'lcham(lar)ni kirit, so'ng har bir satrni `a.append(list(map(float, input("satr: ").split())))` bilan o'qi.
+4. O'ZGARUVCHILAR: qisqa matematik nomlar: n, m, k, s, i, j, a, b, c, d, t, x, y, p, q, R, A, B. Inglizcha uzun nomlar (count, result, max_value) TAQIQLANADI.
+5. KIRITISH: HAR BIR qiymat ALOHIDA input() bilan va albatta qisqa YOZUV (prompt) bilan kiritiladi, aks holda dastur jim turib qolgandek ko'rinadi:
+   `n = int(input("n = "))`, `x = float(input("x = "))`.
+   MASSIV: avval e'lon qil `a = [0] * n`, so'ng sikl bilan element-element kirit:
+      for i in range(n):
+          a[i] = int(input("a[i] = "))
+   MATRITSA: avval `a = []`, `for i in range(n): a.append([0] * m)` bilan e'lon qil, so'ng ichma-ich for bilan:
+          a[i][j] = float(input("a[i][j] = "))
+   Massiv/matritsani chiqarish ham sikl bilan, element-element: print(a[i]) yoki print(a[i][j]).
    Agar masalada berilgan qiymat YO'Q bo'lsa (masalan, oraliq aniq berilgan: [200,300], uch xonali sonlar, 7 gacha maxraj) — input ISHLATMA, to'g'ridan-to'g'ri hisobla.
-   «Fayl» (f, g, h fayllar) so'zi bo'lsa — fayl o'rniga oddiy massiv (ro'yxat) ishlat.
-   Ko'phad: koeffitsientlar massivi sifatida kirit.
-6. KATTA SONLAR: Python butun sonlari cheksiz, 2**200, 3**2022 ni to'g'ridan-to'g'ri hisoblash mumkin; 100! ni sikl bilan ko'paytirib hisobla (math.factorial ishlatma).
-   Natijaning raqamlarini ajratish kerak bo'lsa: `s = str(son)` va sikl orqali raqamlarni chiqar.
-   Juda uzun (4000+ raqamli) sonni int(input()) bilan o'qima: satr sifatida o'qib, raqamma-raqam ishla.
-7. Massivlarni tartiblash, yig'indi, maksimum kabilarni tayyor funksiyalarsiz (sort(), sorted(), sum(), max(), min()) o'zing sikl bilan yoz.
-   Matrisa ko'paytirish, transponirlash, daraja va h.k. ichma-ich for bilan yoz.
-8. TEZLIK: hech qachon cheksiz yoki soatlab ishlaydigan dastur yozma. Chegaralar katta bo'lsa (10^15, 2·10^9, 10^7) to'g'ridan-to'g'ri sikl YOZMA:
-   davr topish, binar qidiruv, tez daraja, dinamik dasturlash kabi samarali usul ishlat.
-   Har bir while sikli albatta tugaydigan bo'lsin (to'xtash sharti va chegara bilan, masalan, m ta qadamgacha).
-9. Izohlar (#) kerak emas. print da natijani tushunarli chiqar: `print("Natija:", s)`.
-10. "Mumkinmi? / bormi? / mavjudmi?" masalalarida «Ha» yoki «Yo'q» deb chiqar.
+   «Fayl» (f, g, h fayllar) so'zi bo'lsa — fayl o'rniga oddiy massiv ishlat.
+   Ko'phad: koeffitsientlar massivi sifatida element-element kirit.
+6. RAQAMLAR bilan ishlash (palindrom, raqamlar yig'indisi, teskari son, sanoq sistemasi): faqat `x % 10` (oxirgi raqam) va `x // 10` (oxirgi raqamni olib tashlash) bilan, sikl ichida.
+7. KATTA SONLAR: Python butun sonlari cheksiz: 2**200, 3**2022 ni to'g'ridan-to'g'ri hisoblash mumkin va raqamlarini % 10, // 10 bilan ajratish mumkin; 100! ni sikl bilan ko'paytirib hisobla.
+8. Massivlarni tartiblash, yig'indi, maksimum kabilarni tayyor funksiyalarsiz o'zing sikl bilan yoz. Matrisa ko'paytirish, transponirlash, daraja va h.k. ichma-ich for bilan yoz.
+9. TEZLIK: hech qachon cheksiz yoki soatlab ishlaydigan dastur yozma. Chegaralar katta bo'lsa (10^15, 2·10^9, 10^7) to'g'ridan-to'g'ri sikl YOZMA:
+   davr topish, binar qidiruv, tez daraja, dinamik dasturlash kabi samarali usul ishlat. Har bir while sikli albatta tugasin.
+10. Izohlar (#) kerak emas. print da natijani tushunarli chiqar: `print("Natija:", s)`. "Mumkinmi? / bormi? / mavjudmi?" masalalarida print("Ha") yoki print("Yo'q").
 11. Rasmga bog'liq bandlar masala matnida so'z bilan tushuntirilgan, shunga amal qil.
-12. Agar «YO'L-YO'RIQ» berilgan bo'lsa — aynan shu usulga amal qil.
+12. Agar «YO'L-YO'RIQ» berilgan bo'lsa — aynan shu usulga amal qil (lekin yuqoridagi taqiqlarga ham amal qil).
 13. JSON maydonlari:
     "explanation": 1-3 gapli sodda o'zbekcha tushuntirish (algoritm g'oyasi);
     "input_format": nimalarni qaysi tartibda kiritish kerakligi (o'zbekcha, qisqa; kiritish bo'lmasa «Kiritish kerak emas»);
-    "test_input": dasturni sinash uchun TO'G'RI namuna kiritish (satrlar \\n bilan ajratilgan). Skalyar parametrlarni
-      masaladagi eng katta chegaraga yaqin ol (massiv/matritsa kichik bo'lsin). Kiritish bo'lmasa bo'sh satr "".
+    "test_input": dasturni sinash uchun TO'G'RI namuna kiritish: HAR BIR input() uchun alohida qiymat, qiymatlar \n bilan ajratilgan.
+      Skalyar parametrlarni masaladagi eng katta chegaraga yaqin ol (massiv/matritsa kichik bo'lsin). Kiritish bo'lmasa bo'sh satr "".
 """
 
 def _call_gemini(prompt: str):
@@ -198,6 +203,33 @@ def check_code_safety(code: str):
         elif isinstance(n, ast.Attribute) and n.attr.startswith("__"):
             raise ValueError("maxsus (__) atributlar taqiqlangan")
     return tree
+
+def check_code_style(tree):
+    """Flowgorithm uslubi: har qatorda bitta amal, taqiqlangan konstruksiyalarsiz."""
+    bad = set()
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Lambda, ast.GeneratorExp, ast.DictComp, ast.SetComp)):
+            bad.add("def/class/lambda taqiqlangan")
+        elif isinstance(n, ast.ListComp):
+            bad.add("list comprehension taqiqlangan (matritsani a.append([0] * m) bilan e'lon qil)")
+        elif isinstance(n, ast.Subscript) and isinstance(n.slice, ast.Slice):
+            bad.add("kesim (a[::-1], a[1:3]) taqiqlangan")
+        elif isinstance(n, ast.Assign):
+            if len(n.targets) > 1:
+                bad.add("zanjirli o'zlashtirish (a = b = 0) taqiqlangan, har bir amalni alohida qatorga yoz")
+            elif isinstance(n.targets[0], ast.Tuple):
+                bad.add("a, b = b, a kabi bir vaqtdagi o'zlashtirish taqiqlangan, t o'zgaruvchi ishlat")
+        elif isinstance(n, ast.Constant) and isinstance(n.value, bool):
+            bad.add("True/False o'rniga 1/0 ishlat")
+        elif isinstance(n, ast.Call):
+            f = n.func
+            if isinstance(f, ast.Name) and f.id in {"str", "list", "map", "sum", "sorted"}:
+                bad.add(f"{f.id}() taqiqlangan")
+            if isinstance(f, ast.Attribute) and f.attr in {"split", "sort", "join", "reverse"}:
+                bad.add(f".{f.attr}() taqiqlangan, qiymatlarni input() bilan element-element kirit")
+    if bad:
+        raise ValueError("USLUB: " + "; ".join(sorted(bad)))
+
 
 def code_has_input(tree) -> bool:
     for n in ast.walk(tree):
@@ -292,6 +324,7 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
                 "problem_text": prob_text,
             }
             candidate = cand
+            check_code_style(tree)               # Flowgorithm uslubi buzilsa ValueError
 
             await verify_run(code, test_input, code_has_input(tree))   # cheksiz sikl / xato bo'lsa ValueError
             result = cand
@@ -308,9 +341,10 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
             await asyncio.sleep(1.0)
 
     if result is None and candidate is not None and warning:
-        # Sinovdan o'tmadi, lekin kod mavjud: foydalanuvchiga ogohlantirish bilan beramiz
-        candidate["explanation"] = (candidate.get("explanation", "") +
-                                    f"\n\n⚠️ Avtomatik tekshiruv ogohlantirishi: {warning}").strip()
+        # Sinovdan/uslub tekshiruvidan o'tmadi, lekin kod mavjud: foydalanuvchiga beramiz
+        if not warning.startswith("USLUB"):
+            candidate["explanation"] = (candidate.get("explanation", "") +
+                                        f"\n\n⚠️ Avtomatik tekshiruv ogohlantirishi: {warning}").strip()
         result = candidate
 
     if result is None:
