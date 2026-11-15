@@ -357,9 +357,13 @@ function renderFlowgorithmSVG(nodes) {
   function drawLine(x1, y1, x2, y2) {
     out.push('<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#334155" stroke-width="2.2"/>');
   }
-  function drawText(cx, cy, text, color, maxChars = 24) {
+  function drawText(cx, cy, text, color, maxChars = 26) {
     let lines = wrapWords(text, maxChars);
-    if (lines.length > 3) lines = [lines[0], lines[1], lines.slice(2).join(" ")];
+    if (lines.length > 3) {
+      let third = lines.slice(2).join(" ");
+      if (third.length > maxChars) third = third.slice(0, maxChars - 1) + "…";
+      lines = [lines[0], lines[1], third];
+    }
     const size = lines.length === 1 ? 13.5 : 12;
     const lh = 15;
     const startY = cy - ((lines.length - 1) * lh) / 2 + 4.5;
