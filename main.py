@@ -86,6 +86,26 @@ def load_problems_from_pdf(pdf_path: str):
 
     print(f"PDF muvaffaqiyatli o'qildi! Bo'limlar soni: {len(PROBLEMS_DB)}")
 
+# ================= MASALALARNI YUKLASH =================
+PROBLEMS_JSON = os.getenv("PROBLEMS_JSON", "problems.json")
+
+def load_problems():
+    """Avval tozalangan problems.json dan o'qiydi (PDF'dagi formulalar buzilib chiqadi),
+    u bo'lmasa PDF'dan o'qishga urinadi."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    path = PROBLEMS_JSON if os.path.isabs(PROBLEMS_JSON) else os.path.join(base, PROBLEMS_JSON)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for sec, probs in data.items():
+                PROBLEMS_DB[sec] = {str(k): v for k, v in probs.items()}
+            print(f"problems.json o'qildi: {sum(len(v) for v in PROBLEMS_DB.values())} ta masala")
+            return
+        except Exception as e:
+            print(f"problems.json o'qishda xato: {e}. PDF ishlatiladi.")
+    load_problems_from_pdf(PDF_PATH)
+
 # ================= AI GENERATOR =================
 def clean_json_text(raw_text: str) -> str:
     text = (raw_text or "").strip()
@@ -98,30 +118,42 @@ def clean_json_text(raw_text: str) -> str:
 # flowchart_builder.code_to_nodes() yordamida aniq quriladi.
 SYSTEM_PROMPT = """
 Sen universitet talabalari uchun eng sodda, odamdek tushunarli Python dasturlarini yozuvchi ustozsan.
-Berilgan masalani yechadigan dastur yoz va faqat sof JSON qaytar:
+Berilgan masalani TO'G'RI yechadigan dastur yoz va faqat sof JSON qaytar:
 {"explanation": "...", "code_python": "..."}
 
+MASALA MATNIDAGI BELGILAR: ^ — daraja (2^200 = 2 ning 200-darajasi), _ yoki pastki indeks — indeks (a_i, d₀),
+n! — faktorial, ≤ ≥ — taqqoslash. Masala shartini ehtiyotkorlik bilan o'qi va to'liq yech.
+
 QAT'IY QOIDALAR:
-1. Dastur TO'LIQ bo'lsin: kiritish (input), hisoblash va chiqarish (print) hammasi bo'lsin. Masala shartini to'liq yech.
-2. FAQAT bitta oddiy dastur: funksiyalar (def), klasslar, kutubxonalar (import), list comprehension, lambda, ichma-ich yozuvlar ISHLATMA.
+1. Dastur TO'LIQ bo'lsin: kiritish (input), hisoblash va chiqarish (print). Masalaning BARCHA bandlarini (a, b, c ...) bajar.
+2. FAQAT bitta oddiy dastur: funksiyalar (def), klasslar, lambda, list comprehension ISHLATMA.
    Faqat oddiy for / while / if / elif / else, o'zlashtirish va print ishlat.
-3. O'ZGARUVCHILAR: qisqa matematik 1 harfli nomlar: n, m, k, s, i, j, a, b, c, x, y, R. Inglizcha uzun nomlar (count, result, max_value) TAQIQLANADI.
-4. Kiritish: `n = int(input())` yoki `a = list(map(int, input().split()))` ko'rinishida, prompt matnisiz.
-5. Massivlar uchun oddiy sikllar ishlat (sort(), sorted(), sum(), max() kabi tayyor funksiyalarsiz, algoritmni o'zing sikl bilan yoz).
-   Matrisa uchun: `a = []` va ichma-ich for bilan to'ldirish.
-6. Izohlar (#) kerak emas.
-7. print da natija o'zgaruvchilarini chiqar: `print(s)` yoki `print("Natija:", s)`.
-8. "explanation": 1-3 gapli sodda o'zbekcha tushuntirish (algoritm g'oyasi).
+3. KUTUBXONA: odatda import KERAK EMAS. Faqat zarur bo'lsa (sin, cos, sqrt, pi, acos kabilar uchun) `from math import ...` ishlat.
+4. O'ZGARUVCHILAR: qisqa matematik nomlar: n, m, k, s, i, j, a, b, c, d, x, y, p, q, R, A, B. Inglizcha uzun nomlar (count, result, max_value) TAQIQLANADI.
+5. KIRITISH (prompt matnisiz): `n = int(input())`; haqiqiy son: `x = float(input())`;
+   massiv: `a = list(map(int, input().split()))`;
+   matritsa: avval o'lcham(lar)ni kirit, so'ng har bir satrni `a.append(list(map(float, input().split())))` bilan o'qi.
+   «Fayl» (f, g, h fayllar) so'zi bo'lsa — fayl o'rniga oddiy massiv (ro'yxat) ishlat.
+   Ko'phad: koeffitsientlar massivi (a_n dan a_0 gacha yoki a_0 dan a_n gacha) sifatida kirit.
+6. KATTA SONLAR: Python butun sonlari cheksiz, 2**200, 3**2022 ni to'g'ridan-to'g'ri hisoblash mumkin; 100! ni sikl bilan ko'paytirib hisobla (math.factorial ishlatma).
+   Natijaning raqamlarini ajratish kerak bo'lsa: `s = str(son)` va sikl orqali raqamlarni chiqar.
+7. Massivlarni tartiblash, yig'indi, maksimum kabilarni tayyor funksiyalarsiz (sort(), sorted(), sum(), max(), min()) o'zing sikl bilan yoz.
+   Matrisa ko'paytirish, transponirlash, daraja va h.k. ichma-ich for bilan yoz.
+8. Katta chegaralar berilgan bo'lsa (masalan 10^15, 2·10^9), to'g'ridan-to'g'ri sikl ishlamaydi: davr topish, binar qidiruv yoki tez daraja kabi samarali usul ishlat.
+9. Izohlar (#) kerak emas. print da natijani chiqar: `print(s)` yoki `print("Natija:", s)`.
+10. "Mumkinmi? / bormi? / mavjudmi?" masalalarida «Ha» yoki «Yo'q» deb chiqar.
+11. Rasmga bog'liq bandlar masala matnida so'z bilan tushuntirilgan, shunga amal qil.
+12. "explanation": 1-3 gapli sodda o'zbekcha tushuntirish (algoritm g'oyasi).
 """
 
 def _call_gemini(prompt: str):
     cfg = dict(
         response_mime_type="application/json",
-        temperature=0.2,
+        temperature=0.1,
         max_output_tokens=8192,
     )
     try:
-        cfg["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=1024)
+        cfg["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=4096)
     except Exception:
         pass
     return gemini_client.models.generate_content(
@@ -308,7 +340,7 @@ async def handle_api_flowchart(request):
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
 async def main():
-    load_problems_from_pdf(PDF_PATH)
+    load_problems()
 
     app = web.Application()
     app.router.add_get("/", handle_index)
