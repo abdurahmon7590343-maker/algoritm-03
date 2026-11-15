@@ -2,6 +2,9 @@ import os
 import re
 import json
 import asyncio
+import ast
+import sys
+import subprocess
 import fitz  # PyMuPDF
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
@@ -35,6 +38,7 @@ gemini_client = genai.Client(
 )
 
 PROBLEMS_DB = {}
+HINTS = {}
 FLOWCHART_CACHE = {}
 
 SECTION_NAMES = {
@@ -98,9 +102,10 @@ def load_problems():
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            HINTS.update(data.pop("_hints", {}) or {})
             for sec, probs in data.items():
                 PROBLEMS_DB[sec] = {str(k): v for k, v in probs.items()}
-            print(f"problems.json o'qildi: {sum(len(v) for v in PROBLEMS_DB.values())} ta masala")
+            print(f"problems.json o'qildi: {sum(len(v) for v in PROBLEMS_DB.values())} ta masala, {len(HINTS)} ta ko'rsatma")
             return
         except Exception as e:
             print(f"problems.json o'qishda xato: {e}. PDF ishlatiladi.")
@@ -118,32 +123,42 @@ def clean_json_text(raw_text: str) -> str:
 # flowchart_builder.code_to_nodes() yordamida aniq quriladi.
 SYSTEM_PROMPT = """
 Sen universitet talabalari uchun eng sodda, odamdek tushunarli Python dasturlarini yozuvchi ustozsan.
-Berilgan masalani TO'G'RI yechadigan dastur yoz va faqat sof JSON qaytar:
-{"explanation": "...", "code_python": "..."}
+Berilgan masalani TO'G'RI va TEZ ishlaydigan qilib yechadigan dastur yoz va faqat sof JSON qaytar:
+{"explanation": "...", "input_format": "...", "test_input": "...", "code_python": "..."}
 
 MASALA MATNIDAGI BELGILAR: ^ — daraja (2^200 = 2 ning 200-darajasi), _ yoki pastki indeks — indeks (a_i, d₀),
 n! — faktorial, ≤ ≥ — taqqoslash. Masala shartini ehtiyotkorlik bilan o'qi va to'liq yech.
 
 QAT'IY QOIDALAR:
-1. Dastur TO'LIQ bo'lsin: kiritish (input), hisoblash va chiqarish (print). Masalaning BARCHA bandlarini (a, b, c ...) bajar.
+1. Dastur TO'LIQ bo'lsin: kiritish, hisoblash va chiqarish (print). Masalaning BARCHA bandlarini (a, b, c ...) bajar.
 2. FAQAT bitta oddiy dastur: funksiyalar (def), klasslar, lambda, list comprehension ISHLATMA.
    Faqat oddiy for / while / if / elif / else, o'zlashtirish va print ishlat.
 3. KUTUBXONA: odatda import KERAK EMAS. Faqat zarur bo'lsa (sin, cos, sqrt, pi, acos kabilar uchun) `from math import ...` ishlat.
 4. O'ZGARUVCHILAR: qisqa matematik nomlar: n, m, k, s, i, j, a, b, c, d, x, y, p, q, R, A, B. Inglizcha uzun nomlar (count, result, max_value) TAQIQLANADI.
-5. KIRITISH (prompt matnisiz): `n = int(input())`; haqiqiy son: `x = float(input())`;
-   massiv: `a = list(map(int, input().split()))`;
-   matritsa: avval o'lcham(lar)ni kirit, so'ng har bir satrni `a.append(list(map(float, input().split())))` bilan o'qi.
+5. KIRITISH: HAR BIR input() da albatta qisqa YOZUV (prompt) bo'lsin, aks holda dastur jim turib qolgandek ko'rinadi:
+   `n = int(input("n = "))`, `x = float(input("x = "))`,
+   massiv: `a = list(map(int, input("a massivi (probel bilan): ").split()))`,
+   matritsa: avval o'lcham(lar)ni kirit, so'ng har bir satrni `a.append(list(map(float, input("satr: ").split())))` bilan o'qi.
+   Agar masalada berilgan qiymat YO'Q bo'lsa (masalan, oraliq aniq berilgan: [200,300], uch xonali sonlar, 7 gacha maxraj) — input ISHLATMA, to'g'ridan-to'g'ri hisobla.
    «Fayl» (f, g, h fayllar) so'zi bo'lsa — fayl o'rniga oddiy massiv (ro'yxat) ishlat.
-   Ko'phad: koeffitsientlar massivi (a_n dan a_0 gacha yoki a_0 dan a_n gacha) sifatida kirit.
+   Ko'phad: koeffitsientlar massivi sifatida kirit.
 6. KATTA SONLAR: Python butun sonlari cheksiz, 2**200, 3**2022 ni to'g'ridan-to'g'ri hisoblash mumkin; 100! ni sikl bilan ko'paytirib hisobla (math.factorial ishlatma).
    Natijaning raqamlarini ajratish kerak bo'lsa: `s = str(son)` va sikl orqali raqamlarni chiqar.
+   Juda uzun (4000+ raqamli) sonni int(input()) bilan o'qima: satr sifatida o'qib, raqamma-raqam ishla.
 7. Massivlarni tartiblash, yig'indi, maksimum kabilarni tayyor funksiyalarsiz (sort(), sorted(), sum(), max(), min()) o'zing sikl bilan yoz.
    Matrisa ko'paytirish, transponirlash, daraja va h.k. ichma-ich for bilan yoz.
-8. Katta chegaralar berilgan bo'lsa (masalan 10^15, 2·10^9), to'g'ridan-to'g'ri sikl ishlamaydi: davr topish, binar qidiruv yoki tez daraja kabi samarali usul ishlat.
-9. Izohlar (#) kerak emas. print da natijani chiqar: `print(s)` yoki `print("Natija:", s)`.
+8. TEZLIK: hech qachon cheksiz yoki soatlab ishlaydigan dastur yozma. Chegaralar katta bo'lsa (10^15, 2·10^9, 10^7) to'g'ridan-to'g'ri sikl YOZMA:
+   davr topish, binar qidiruv, tez daraja, dinamik dasturlash kabi samarali usul ishlat.
+   Har bir while sikli albatta tugaydigan bo'lsin (to'xtash sharti va chegara bilan, masalan, m ta qadamgacha).
+9. Izohlar (#) kerak emas. print da natijani tushunarli chiqar: `print("Natija:", s)`.
 10. "Mumkinmi? / bormi? / mavjudmi?" masalalarida «Ha» yoki «Yo'q» deb chiqar.
 11. Rasmga bog'liq bandlar masala matnida so'z bilan tushuntirilgan, shunga amal qil.
-12. "explanation": 1-3 gapli sodda o'zbekcha tushuntirish (algoritm g'oyasi).
+12. Agar «YO'L-YO'RIQ» berilgan bo'lsa — aynan shu usulga amal qil.
+13. JSON maydonlari:
+    "explanation": 1-3 gapli sodda o'zbekcha tushuntirish (algoritm g'oyasi);
+    "input_format": nimalarni qaysi tartibda kiritish kerakligi (o'zbekcha, qisqa; kiritish bo'lmasa «Kiritish kerak emas»);
+    "test_input": dasturni sinash uchun TO'G'RI namuna kiritish (satrlar \\n bilan ajratilgan). Skalyar parametrlarni
+      masaladagi eng katta chegaraga yaqin ol (massiv/matritsa kichik bo'lsin). Kiritish bo'lmasa bo'sh satr "".
 """
 
 def _call_gemini(prompt: str):
@@ -162,21 +177,87 @@ def _call_gemini(prompt: str):
         config=genai_types.GenerateContentConfig(**cfg)
     )
 
+
+# ================= KODNI TEKSHIRISH (xavfsizlik + sinov ishga tushirish) =================
+ALLOWED_IMPORTS = {"math"}
+BANNED_NAMES = {"open", "exec", "eval", "compile", "__import__", "globals", "locals",
+                "getattr", "setattr", "delattr", "vars", "breakpoint", "exit", "quit"}
+
+def check_code_safety(code: str):
+    tree = ast.parse(code)
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            for al in n.names:
+                if al.name.split(".")[0] not in ALLOWED_IMPORTS:
+                    raise ValueError(f"'{al.name}' kutubxonasi taqiqlangan, faqat math ruxsat etiladi")
+        elif isinstance(n, ast.ImportFrom):
+            if (n.module or "").split(".")[0] not in ALLOWED_IMPORTS:
+                raise ValueError(f"'{n.module}' kutubxonasi taqiqlangan, faqat math ruxsat etiladi")
+        elif isinstance(n, ast.Name) and n.id in BANNED_NAMES:
+            raise ValueError(f"'{n.id}' ishlatish taqiqlangan")
+        elif isinstance(n, ast.Attribute) and n.attr.startswith("__"):
+            raise ValueError("maxsus (__) atributlar taqiqlangan")
+    return tree
+
+def code_has_input(tree) -> bool:
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "input":
+            return True
+    return False
+
+def _run_sync(code: str, test_input: str):
+    def limits():
+        try:
+            import resource
+            resource.setrlimit(resource.RLIMIT_AS, (768 * 1024 * 1024, 768 * 1024 * 1024))
+            resource.setrlimit(resource.RLIMIT_CPU, (12, 12))
+        except Exception:
+            pass
+    return subprocess.run(
+        [sys.executable, "-I", "-c", code],
+        input=test_input, capture_output=True, text=True, timeout=10,
+        preexec_fn=limits if os.name == "posix" else None,
+    )
+
+async def verify_run(code: str, test_input: str, has_input: bool):
+    """Kodni sinab ko'radi: cheksiz/sekin sikl yoki xatoni aniqlasa ValueError beradi."""
+    if has_input and not test_input.strip():
+        return  # namuna kiritish yo'q — sinab bo'lmaydi
+    try:
+        r = await asyncio.to_thread(_run_sync, code, test_input if has_input else "")
+    except subprocess.TimeoutExpired:
+        raise ValueError(
+            "Dastur 10 soniyada tugamadi (cheksiz yoki juda sekin sikl). "
+            "Samaraliroq algoritm ishlat: davr topish, binar qidiruv, tez daraja yoki dinamik dasturlash."
+        )
+    if r.returncode != 0:
+        last = (r.stderr.strip().splitlines() or ["noma'lum xato"])[-1]
+        if has_input and last.startswith(("EOFError", "ValueError")):
+            return  # namuna kiritish mos kelmagan bo'lishi mumkin, kodni ayblamaymiz
+        raise ValueError(f"Dastur ishlaganda xato chiqdi: {last}")
+    if not r.stdout.strip():
+        raise ValueError("Dastur hech narsa chiqarmadi (print yo'q)")
+
 async def generate_flowchart_ast(sec: str, num: str) -> dict:
     cache_key = f"{sec}_{num}"
     if cache_key in FLOWCHART_CACHE:
         return FLOWCHART_CACHE[cache_key]
 
     prob_text = PROBLEMS_DB.get(sec, {}).get(num, f"§-{sec} bo'lim, {num}-masala.")
+    hint = HINTS.get(f"{sec}.{num}")
     base_prompt = (
         f"{SYSTEM_PROMPT}\n\n"
         f"Bo'lim: {SECTION_NAMES.get(sec, sec)}\n"
         f"Masala #{num}: {prob_text}\n"
     )
+    if hint:
+        base_prompt += f"\nYO'L-YO'RIQ (aynan shu usulga amal qil): {hint}\n"
 
     last_err = None
     extra = ""
     result = None
+    candidate = None      # sintaksis jihatdan to'g'ri, lekin sinovdan o'tmagan variant
+    warning = ""
     for attempt in range(3):
         try:
             response = await asyncio.wait_for(
@@ -192,26 +273,45 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
             if not code.strip():
                 raise ValueError("AI kod qaytarmadi")
 
-            nodes = code_to_nodes(code)          # sintaksis xato bo'lsa SyntaxError beradi
+            tree = check_code_safety(code)       # SyntaxError / taqiqlangan narsa -> xato
+            nodes = code_to_nodes(code)
             if not nodes:
                 raise ValueError("Koddan blok-sxema qurib bo'lmadi")
 
-            result = {
+            test_input = str(data.get("test_input", "") or "").replace("\\n", "\n")
+            if test_input and not test_input.endswith("\n"):
+                test_input += "\n"
+
+            cand = {
                 "title": f"{SECTION_NAMES.get(sec, sec)}. {num}-masala",
                 "explanation": data.get("explanation", ""),
+                "input_format": data.get("input_format", ""),
+                "sample_input": test_input.strip("\n"),
                 "code_python": code,
                 "nodes": nodes,
                 "problem_text": prob_text,
             }
+            candidate = cand
+
+            await verify_run(code, test_input, code_has_input(tree))   # cheksiz sikl / xato bo'lsa ValueError
+            result = cand
             break
         except Exception as e:
             last_err = e
             print(f"Generatsiya xatosi (urinish {attempt + 1}): {e}")
+            if candidate is not None and isinstance(e, ValueError):
+                warning = str(e)
             extra = (
                 f"\nOLDINGI JAVOBDA XATO BO'LDI: {e}\n"
-                f"Qoidalarga qat'iy amal qilib, to'g'ri JSON va ishlaydigan kodni qaytar.\n"
+                f"Qoidalarga qat'iy amal qilib, to'g'ri JSON va ishlaydigan, TEZ kodni qaytar.\n"
             )
             await asyncio.sleep(1.0)
+
+    if result is None and candidate is not None and warning:
+        # Sinovdan o'tmadi, lekin kod mavjud: foydalanuvchiga ogohlantirish bilan beramiz
+        candidate["explanation"] = (candidate.get("explanation", "") +
+                                    f"\n\n⚠️ Avtomatik tekshiruv ogohlantirishi: {warning}").strip()
+        result = candidate
 
     if result is None:
         raise RuntimeError(f"AI to'g'ri javob bera olmadi: {last_err}")
