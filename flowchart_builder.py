@@ -180,7 +180,13 @@ def _convert(stmts, func_names) -> list:
         elif isinstance(st, ast.Expr) and isinstance(st.value, ast.Call):
             call = st.value
             fname = call.func.id if isinstance(call.func, ast.Name) else None
-            if fname == "print":
+            if fname != "input" and _has_input(call):
+                # masalan: a.append(list(map(float, input().split())))
+                nm = []
+                if isinstance(call.func, ast.Attribute):
+                    nm = [_s(call.func.value)]
+                nodes.append({"type": "input", "text": "", "_names": nm})
+            elif fname == "print":
                 nodes.append({"type": "output", "text": _print_text(call), "_special": True})
             elif fname == "input":
                 nodes.append({"type": "input", "text": "Kiritish", "_names": []})
