@@ -76,7 +76,15 @@
 
   <div id="code-container">
     <h4 style="color:#38bdf8; margin-bottom:8px;">📌 Algoritm tushuntirishi:</h4>
-    <p id="explanationText" style="margin-bottom:18px; font-size:14px; line-height:1.55; color:#cbd5e1;"></p>
+    <p id="explanationText" style="margin-bottom:14px; font-size:14px; line-height:1.55; color:#cbd5e1; white-space:pre-wrap;"></p>
+    <div id="inputBox" style="display:none; margin-bottom:18px;">
+      <h4 style="color:#38bdf8; margin-bottom:6px;">⌨️ Kiritish tartibi (PyCharm uchun):</h4>
+      <p id="inputFormat" style="font-size:13.5px; line-height:1.5; color:#cbd5e1; margin-bottom:8px; white-space:pre-wrap;"></p>
+      <div id="sampleWrap" style="display:none;">
+        <div style="font-size:12px; color:#94a3b8; margin-bottom:4px;">Namuna (nusxalab, dastur so'raganda kiriting):</div>
+        <pre id="sampleInput" style="padding:10px; font-size:13px;"></pre>
+      </div>
+    </div>
     <div class="code-header">
       <h4 style="color:#38bdf8;">🐍 Python dasturi:</h4>
       <button class="copy-btn" onclick="copyCode()">📋 Nusxalash</button>
@@ -187,6 +195,12 @@ async function loadFlowchart(force = false) {
     document.getElementById("probText").textContent = sec + "." + num + "-masala: " + (data.problem_text || "");
     document.getElementById("explanationText").textContent = data.explanation || "";
     document.getElementById("pythonCode").textContent = data.code_python || "# Kod mavjud emas";
+    const fmt = (data.input_format || "").trim();
+    const smp = (data.sample_input || "").trim();
+    document.getElementById("inputBox").style.display = (fmt || smp) ? "block" : "none";
+    document.getElementById("inputFormat").textContent = fmt;
+    document.getElementById("sampleWrap").style.display = smp ? "block" : "none";
+    document.getElementById("sampleInput").textContent = smp;
 
     const cleanNodes = (data.nodes || []).filter(n => n && n.type !== "declare");
     const fullNodes = [
