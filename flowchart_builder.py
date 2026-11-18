@@ -1,26 +1,48 @@
-"""Python kodidan Flowgorithm uslubidagi blok-sxema daraxtini (nodes) quruvchi modul.
+"""Python kodidan Flowgorithm / klassik o'zbekcha standartdagi blok-sxema daraxtini (nodes) quruvchi modul.
 
-Qoidalar (Flowgorithm kabi):
-  * HAR BIR amal — alohida blok (kiritish, o'zlashtirish, chiqarish bittadan).
-  * Blok ichida faqat amal/ifoda: s = s + 1, x mod 2 = 0, a[i] = a[i] + 1.
-  * Sikl va shartlar dastur bajarilish tartibiga mos chiziladi.
-  * Massiv e'lon qilish (a = [0]*n, a = []) blok bo'lmaydi.
+Asosiy qoidalar:
+  * Blok ichiga HECH QACHON Python funksiyalari (int(), float(), str(), len(), range(), append(), math.) chiqmaydi!
+  * Har bir amal sof matematik-algoritmik yozuvda bo'ladi:
+      - Kiritish: "Kiritish: n"
+      - O'zlashtirish: "s = s + 1", "d = b^2 - 4*a*c"
+      - Shart: "a^2 + b^2 = c^2", "x mod 2 = 0"
+      - Parametrli sikl: "i = 1 dan n gacha"
+      - Shartli sikl: "n > 0"
+      - Chiqarish: "Chiqarish: s"
+  * Massiv e'lon qilish va texnik qatorlar (a = [0]*n, a = [], a.append([0]*m), import) blok-sxemaga qo'shilmaydi!
 """
 import ast
 
-PREC = {ast.Pow: 5, ast.Mult: 4, ast.Div: 4, ast.FloorDiv: 4, ast.Mod: 4, ast.Add: 3, ast.Sub: 3}
-BIN_SYMBOL = {ast.Add: " + ", ast.Sub: " - ", ast.Mult: "*", ast.Div: "/",
-              ast.FloorDiv: " div ", ast.Mod: " mod ", ast.Pow: "^"}
-CMP_SYMBOL = {ast.Eq: "=", ast.NotEq: "≠", ast.Lt: "<", ast.LtE: "≤", ast.Gt: ">", ast.GtE: "≥",
-              ast.In: "∈", ast.NotIn: "∉", ast.Is: "=", ast.IsNot: "≠"}
-
-
-# ---------------------------------------------------------------- ifodalar
-def _s(node) -> str:
-    try:
-        return ast.unparse(node)
-    except Exception:
-        return "?"
+PREC = {
+    ast.Pow: 5,
+    ast.Mult: 4,
+    ast.Div: 4,
+    ast.FloorDiv: 4,
+    ast.Mod: 4,
+    ast.Add: 3,
+    ast.Sub: 3,
+}
+BIN_SYMBOL = {
+    ast.Add: " + ",
+    ast.Sub: " - ",
+    ast.Mult: " * ",
+    ast.Div: " / ",
+    ast.FloorDiv: " div ",
+    ast.Mod: " mod ",
+    ast.Pow: "^",
+}
+CMP_SYMBOL = {
+    ast.Eq: "=",
+    ast.NotEq: "≠",
+    ast.Lt: "<",
+    ast.LtE: "≤",
+    ast.Gt: ">",
+    ast.GtE: "≥",
+    ast.In: "∈",
+    ast.NotIn: "∉",
+    ast.Is: "=",
+    ast.IsNot: "≠",
+}
 
 
 def _prec(node) -> int:
@@ -41,8 +63,12 @@ def _wrap(node, min_prec: int) -> str:
 
 
 def _is_num(node, value=None) -> bool:
-    return isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) \
-        and not isinstance(node.value, bool) and (value is None or node.value == value)
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, (int, float))
+        and not isinstance(node.value, bool)
+        and (value is None or node.value == value)
+    )
 
 
 def _expr(node) -> str:
@@ -55,31 +81,38 @@ def _expr(node) -> str:
         if v is False or v is None:
             return "0"
         if isinstance(v, str):
-            return "'" + v + "'"
+            return f'"{v}"'
         return repr(v)
 
     if isinstance(node, ast.Name):
-        return "π" if node.id == "pi" else node.id
+        if node.id == "pi":
+            return "π"
+        if node.id == "True":
+            return "1"
+        if node.id == "False":
+            return "0"
+        return node.id
 
-    if isinstance(node, ast.Tuple):
-        return "(" + ", ".join(_expr(e) for e in node.elts) + ")"
-
-    if isinstance(node, ast.List):
-        return "[" + ", ".join(_expr(e) for e in node.elts) + "]"
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return ", ".join(_expr(e) for e in node.elts)
 
     if isinstance(node, ast.BinOp):
         op = type(node.op)
         p = PREC.get(op, 3)
         if op is ast.Pow:
             if _is_num(node.right, 0.5):
-                return "√(" + _expr(node.left) + ")"
+                return f"√({_expr(node.left)})"
+            if _is_num(node.right, 2) and isinstance(node.left, ast.Name):
+                return f"{_expr(node.left)}²"
+            if _is_num(node.right, 3) and isinstance(node.left, ast.Name):
+                return f"{_expr(node.left)}³"
             base = _wrap(node.left, p + 1)
             if isinstance(node.left, ast.UnaryOp) or (_is_num(node.left) and node.left.value < 0):
                 base = f"({_expr(node.left)})"
             return f"{base}^{_wrap(node.right, p)}"
         left = _wrap(node.left, p)
         right = _wrap(node.right, p + 1)
-        return f"{left}{BIN_SYMBOL.get(op, '?')}{right}"
+        return f"{left}{BIN_SYMBOL.get(op, ' ? ')}{right}"
 
     if isinstance(node, ast.UnaryOp):
         if isinstance(node.op, ast.USub):
@@ -104,52 +137,70 @@ def _expr(node) -> str:
     if isinstance(node, ast.Compare):
         out = _wrap(node.left, 2)
         for op, cmp in zip(node.ops, node.comparators):
-            out += f" {CMP_SYMBOL.get(type(op), '?')} {_wrap(cmp, 2)}"
+            out += f" {CMP_SYMBOL.get(type(op), '=')} {_wrap(cmp, 2)}"
         return out
+
+    if isinstance(node, ast.IfExp):
+        return f"{_expr(node.body)} (agar {_expr(node.test)}, aks holda {_expr(node.orelse)})"
 
     if isinstance(node, ast.Subscript):
         sl = node.slice
         base = _wrap(node.value, 9)
         if isinstance(sl, ast.Slice):
-            lo = _expr(sl.lower) if sl.lower is not None else ""
+            lo = _expr(sl.lower) if sl.lower is not None else "0"
             up = _expr(sl.upper) if sl.upper is not None else ""
-            return f"{base}[{lo}:{up}]"
+            return f"{base}[{lo}..{up}]"
         if isinstance(sl, ast.Tuple):
             return base + "".join(f"[{_expr(e)}]" for e in sl.elts)
         return f"{base}[{_expr(sl)}]"
 
     if isinstance(node, ast.Attribute):
-        return f"{_expr(node.value)}.{node.attr}"
+        val = _expr(node.value)
+        if val == "math":
+            return "π" if node.attr == "pi" else node.attr
+        return f"{val}.{node.attr}"
 
     if isinstance(node, ast.Call):
-        name = node.func.id if isinstance(node.func, ast.Name) else None
+        fname = None
+        if isinstance(node.func, ast.Name):
+            fname = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            fname = node.func.attr
+
         args = [_expr(a) for a in node.args]
         a0 = args[0] if args else ""
-        if name == "float":
-            return a0 or "0"
-        if name == "abs":
-            return f"|{a0}|"
-        if name == "sqrt":
-            return f"√({a0})"
-        if name == "floor":
-            return f"⌊{a0}⌋"
-        if name == "ceil":
-            return f"⌈{a0}⌉"
-        if name == "pow" and len(args) == 2:
-            return f"{_wrap(node.args[0], 6)}^{_wrap(node.args[1], 5)}"
-        if name == "input":
-            return "?"
-        if name:                       # int(x), sin(x), max(a, b), len(a) ...
-            return f"{name}({', '.join(args)})"
-        if isinstance(node.func, ast.Attribute):
-            return f"{_expr(node.func.value)}.{node.func.attr}({', '.join(args)})"
-        return _s(node)
 
-    return _s(node)
+        # Python tur almashtirish funksiyalarini blok-sxemada ko'rsatmaymiz (toza o'zgaruvchi qoladi)
+        if fname in ("int", "float", "str", "bool", "round", "floor", "trunc"):
+            if fname == "round" and len(args) == 1:
+                return f"yaxlit({a0})"
+            if fname == "int" and len(node.args) == 1 and isinstance(node.args[0], ast.BinOp) and isinstance(node.args[0].op, ast.Add) and _is_num(node.args[0].right, 0.5):
+                return f"yaxlit({_expr(node.args[0].left)})"
+            return a0 or "0"
+        if fname == "ceil":
+            return f"⌈{a0}⌉"
+        if fname == "abs":
+            return f"|{a0}|"
+        if fname == "sqrt":
+            return f"√({a0})"
+        if fname == "pow" and len(args) == 2:
+            return f"{_wrap(node.args[0], 6)}^{_wrap(node.args[1], 5)}"
+        if fname == "len":
+            return f"uzunlik({a0})"
+        if fname == "input":
+            return ""
+        if fname in ("max", "min", "sin", "cos", "tan", "asin", "acos", "atan", "gcd"):
+            uz_name = "EKUB" if fname == "gcd" else fname
+            return f"{uz_name}({', '.join(args)})"
+        if fname:
+            return f"{fname}({', '.join(args)})"
+        return ""
+
+    return ""
 
 
 def _expr_top(node) -> str:
-    if isinstance(node, ast.Tuple):
+    if isinstance(node, (ast.Tuple, ast.List)):
         return ", ".join(_expr(e) for e in node.elts)
     return _expr(node)
 
@@ -162,11 +213,13 @@ def _cond(node) -> str:
     return _expr(node).strip()
 
 
-# ---------------------------------------------------------------- yordamchilar
 def _has_input(node) -> bool:
     for n in ast.walk(node):
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "input":
-            return True
+        if isinstance(n, ast.Call):
+            if isinstance(n.func, ast.Name) and n.func.id == "input":
+                return True
+            if isinstance(n.func, ast.Attribute) and n.func.attr in ("split", "readline", "read"):
+                return True
     return False
 
 
@@ -180,11 +233,23 @@ def _target_names(target) -> list:
 
 
 def _is_list_decl(value) -> bool:
-    """a = [], a = [0]*n, [[0]*m for ...] kabi massiv e'lonlari blok bo'lmaydi."""
-    if isinstance(value, (ast.List, ast.ListComp)):
+    """a = [], a = [0]*n, [[0]*m for ...] kabi texnik massiv e'lonlari blok-sxemada ko'rsatilmaydi."""
+    if isinstance(value, (ast.List, ast.ListComp, ast.Dict, ast.Set)):
         return True
     if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Mult):
         return isinstance(value.left, (ast.List, ast.ListComp)) or isinstance(value.right, (ast.List, ast.ListComp))
+    return False
+
+
+def _is_list_init_loop(node: ast.For) -> bool:
+    """Faqat massiv/matritsani nollar bilan to'ldiruvchi texnik siklni aniqlash (a.append([0]*m))."""
+    if len(node.body) == 1:
+        st = node.body[0]
+        if isinstance(st, ast.Expr) and isinstance(st.value, ast.Call):
+            call = st.value
+            if isinstance(call.func, ast.Attribute) and call.func.attr == "append" and len(call.args) == 1:
+                if _is_list_decl(call.args[0]) and not _has_input(call.args[0]):
+                    return True
     return False
 
 
@@ -192,19 +257,28 @@ def _print_text(call: ast.Call) -> str:
     shown, literals = [], []
     for a in call.args:
         if isinstance(a, ast.Constant) and isinstance(a.value, str):
-            literals.append(a.value.strip())
+            val = a.value.strip().rstrip(":").strip()
+            if val:
+                literals.append(val)
         elif isinstance(a, ast.JoinedStr):
             for v in a.values:
                 if isinstance(v, ast.FormattedValue):
                     shown.append(_expr(v.value))
                 elif isinstance(v, ast.Constant) and isinstance(v.value, str):
-                    literals.append(v.value.strip())
+                    val = v.value.strip().rstrip(":").strip()
+                    if val:
+                        literals.append(val)
         else:
-            shown.append(_expr(a))
+            ex = _expr(a)
+            if ex:
+                shown.append(ex)
+
     if shown:
         return "Chiqarish: " + ", ".join(shown)
-    lit = " ".join(x for x in literals if x).strip(" :")
-    return "Chiqarish: " + (lit if lit else "")
+    lit = " ".join(x for x in literals if x).strip()
+    if lit:
+        return f'Chiqarish: "{lit}"'
+    return ""
 
 
 def _stop_inclusive(stop, step_positive=True) -> str:
@@ -225,8 +299,12 @@ def _stop_inclusive(stop, step_positive=True) -> str:
 def _for_condition(node: ast.For) -> str:
     var = _expr(node.target)
     it = node.iter
-    if isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == "range" \
-            and 1 <= len(it.args) <= 3:
+    if (
+        isinstance(it, ast.Call)
+        and isinstance(it.func, ast.Name)
+        and it.func.id == "range"
+        and 1 <= len(it.args) <= 3
+    ):
         args = it.args
         if len(args) == 1:
             start, stop, step = "0", args[0], None
@@ -255,11 +333,11 @@ def _aug_text(stmt) -> str:
     return f"{_expr(stmt.target)} = {_expr(bin_node)}"
 
 
-# ---------------------------------------------------------------- daraxt qurish
 def _input_nodes(names):
-    if not names:
+    clean = [n for n in names if n]
+    if not clean:
         return [{"type": "input", "text": "Kiritish"}]
-    return [{"type": "input", "text": f"Kiritish: {n}"} for n in names]
+    return [{"type": "input", "text": f"Kiritish: {', '.join(clean)}"}]
 
 
 def _convert(stmts, func_names) -> list:
@@ -277,36 +355,53 @@ def _convert(stmts, func_names) -> list:
         if isinstance(st, (ast.Try, ast.With, ast.AsyncWith)):
             nodes += _convert(st.body, func_names)
             continue
-        if isinstance(st, ast.If) and "__name__" in _s(st.test):
+        if isinstance(st, ast.If) and "__name__" in ast.unparse(st.test):
             nodes += _convert(st.body, func_names)
             continue
 
         if isinstance(st, ast.If):
-            nodes.append({
-                "type": "if",
-                "condition": _cond(st.test),
-                "trueBranch": _convert(st.body, func_names),
-                "falseBranch": _convert(st.orelse, func_names),   # elif -> ichma-ich if
-            })
+            t_branch = _convert(st.body, func_names)
+            f_branch = _convert(st.orelse, func_names)
+            if t_branch or f_branch:
+                nodes.append({
+                    "type": "if",
+                    "condition": _cond(st.test),
+                    "trueBranch": t_branch,
+                    "falseBranch": f_branch,
+                })
         elif isinstance(st, ast.For):
-            nodes.append({"type": "for", "condition": _for_condition(st),
-                          "body": _convert(st.body, func_names)})
+            if _is_list_init_loop(st):
+                continue
+            body_nodes = _convert(st.body, func_names)
+            if body_nodes:
+                nodes.append({
+                    "type": "for",
+                    "condition": _for_condition(st),
+                    "body": body_nodes,
+                })
         elif isinstance(st, ast.While):
-            nodes.append({"type": "while", "condition": _cond(st.test),
-                          "body": _convert(st.body, func_names)})
+            body_nodes = _convert(st.body, func_names)
+            if body_nodes:
+                nodes.append({
+                    "type": "while",
+                    "condition": _cond(st.test),
+                    "body": body_nodes,
+                })
         elif isinstance(st, ast.Break):
             nodes.append({"type": "assign", "text": "Sikldan chiqish"})
         elif isinstance(st, ast.Continue):
-            nodes.append({"type": "assign", "text": "Keyingi qadam"})
+            nodes.append({"type": "assign", "text": "Keyingi qadamga o'tish"})
         elif isinstance(st, ast.Return):
-            nodes.append({"type": "output",
-                          "text": "Qaytarish" + (": " + _expr_top(st.value) if st.value is not None else "")})
+            if st.value is not None:
+                nodes.append({"type": "output", "text": f"Chiqarish: {_expr_top(st.value)}"})
         elif isinstance(st, ast.Expr) and isinstance(st.value, ast.Call):
             call = st.value
             fname = call.func.id if isinstance(call.func, ast.Name) else None
             is_attr = isinstance(call.func, ast.Attribute)
             if fname == "print":
-                nodes.append({"type": "output", "text": _print_text(call)})
+                ptxt = _print_text(call)
+                if ptxt:
+                    nodes.append({"type": "output", "text": ptxt})
             elif fname == "input":
                 nodes += _input_nodes([])
             elif fname in func_names:
@@ -316,14 +411,12 @@ def _convert(stmts, func_names) -> list:
                 if _has_input(arg):
                     nodes += _input_nodes([_expr(call.func.value)])
                 elif _is_list_decl(arg):
-                    continue                      # matritsa satrini e'lon qilish — blok emas
+                    continue
                 else:
                     a = _expr(call.func.value)
-                    nodes.append({"type": "assign", "text": f"{a} = {a} + [{_expr(arg)}]"})
+                    nodes.append({"type": "assign", "text": f"{a} ga {_expr(arg)} qo'shish"})
             elif _has_input(call):
                 nodes += _input_nodes([_expr(call.func.value)] if is_attr else [])
-            else:
-                nodes.append({"type": "assign", "text": _expr(call)})
         elif isinstance(st, ast.AugAssign):
             nodes.append({"type": "assign", "text": _aug_text(st)})
         elif isinstance(st, (ast.Assign, ast.AnnAssign)):
@@ -335,18 +428,38 @@ def _convert(stmts, func_names) -> list:
                 names = []
                 for t in targets:
                     names += _target_names(t)
-                nodes += _input_nodes(names)         # har bir o'zgaruvchi — alohida blok
+                nodes += _input_nodes(names)
             elif _is_list_decl(value):
-                continue                              # massiv e'loni — blok emas
+                continue
             else:
-                for t in targets:                     # a = b = 0 -> ikkita alohida blok
-                    nodes.append({"type": "assign", "text": f"{_expr_top(t)} = {_expr_top(value)}"})
+                for t in targets:
+                    lhs = _expr_top(t)
+                    rhs = _expr_top(value)
+                    if lhs and rhs and lhs != rhs:
+                        nodes.append({"type": "assign", "text": f"{lhs} = {rhs}"})
+
+    # Ketma-ket kelgan Kiritish bloklarini (masalan Kiritish: k, Kiritish: l, Kiritish: m) bitta chiroyli blokka birlashtirish
+    merged = []
+    for nd in nodes:
+        if (
+            nd["type"] == "input"
+            and merged
+            and merged[-1]["type"] == "input"
+            and nd["text"].startswith("Kiritish: ")
+            and merged[-1]["text"].startswith("Kiritish: ")
+            and "[" not in nd["text"]
+            and "[" not in merged[-1]["text"]
+            and len(merged[-1]["text"]) + len(nd["text"]) < 34
+        ):
+            var_part = nd["text"].replace("Kiritish: ", "").strip()
+            merged[-1]["text"] += f", {var_part}"
         else:
-            nodes.append({"type": "assign", "text": _s(st)})
-    return nodes
+            merged.append(nd)
+
+    return merged
 
 
 def code_to_nodes(code: str) -> list:
-    """Python kodidan blok-sxema bloklari ro'yxatini qaytaradi. Sintaksis xato bo'lsa SyntaxError."""
+    """Python kodidan toza blok-sxema bloklari ro'yxatini qaytaradi."""
     tree = ast.parse(code)
     return _convert(tree.body, set())
