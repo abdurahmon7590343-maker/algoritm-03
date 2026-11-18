@@ -24,7 +24,6 @@
 
   .workspace { flex: 1; position: relative; overflow: hidden; background: #f8fafc; min-height: 0; }
 
-  /* Markazlashtirish flex bilan EMAS: katta chizma chap tomondan kesilib qolmasligi uchun */
   #canvas-container {
     width: 100%; height: 100%; overflow: auto; display: block;
     -webkit-overflow-scrolling: touch;
@@ -102,7 +101,6 @@
 </div>
 
 <script>
-// Telegram bo'lmasa ham (oddiy brauzerda) ishlayversin
 const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
 if (tg) { try { tg.ready(); tg.expand(); } catch (e) { console.warn(e); } }
 
@@ -220,7 +218,6 @@ async function loadFlowchart(force = false) {
   }
 }
 
-// ================= MASSHTAB (ekranga sig'dirish, zoom, pinch) =================
 function applyScale() {
   const svg = document.getElementById("flow-svg");
   if (!svg) return;
@@ -231,7 +228,7 @@ function applyScale() {
 function fitToScreen() {
   const cont = document.getElementById("canvas-container");
   const cw = (cont.clientWidth || window.innerWidth) - 32;
-  currentScale = Math.max(0.3, Math.min(1, cw / svgW));
+  currentScale = Math.max(0.32, Math.min(1, cw / svgW));
   applyScale();
 }
 
@@ -288,7 +285,6 @@ function fallbackCopy(text, cb) {
   cb();
 }
 
-// ================= MATN O'RASH =================
 function wrapWords(text, maxChars = 24) {
   const words = String(text || "").trim().split(/\s+/);
   const lines = [];
@@ -302,13 +298,13 @@ function wrapWords(text, maxChars = 24) {
   return lines.length ? lines : [""];
 }
 
-// ================= GRAFIK MOTOR =================
-const NODE_W = 200;
+// ================= TO'G'RILANGAN GRAFIK MOTOR =================
+const NODE_W = 210;
 const NODE_H = 54;
 const V_GAP = 32;
-const IF_H = 76;
+const IF_H = 78;
 const IF_W = NODE_W + 30;
-const LOOP_H = 62;
+const LOOP_H = 64;
 const LOOP_W = NODE_W + 26;
 
 function measureSequence(nodes) {
@@ -331,28 +327,32 @@ function measureNode(node) {
   if (t === "if") {
     const tSeq = measureSequence(node.trueBranch || []);
     const fSeq = measureSequence(node.falseBranch || []);
-    // Bo'sh shoxcha tor bo'ladi, to'lgani keng. Ikkala tomon SIMMETRIK
-    // o'lchanadi, aks holda blok markazdan chiqib ketadi va kesilib qoladi.
-    const tw = tSeq.items.length ? tSeq.width : 40;
-    const fw = fSeq.items.length ? fSeq.width : 40;
-    const side = Math.max(tw, fw, 80);
-    const d = Math.max(IF_W / 2 + 16, 20 + side / 2);   // markazdan shoxcha o'qigacha masofa
-    const width = 2 * (d + side / 2) + 10;
+    // Har bir shoxcha o'zining haqiqiy kengligi bo'yicha hisoblanadi (bo'sh Yo'q tarmog'i chizmani 2 barobar cho'zib yubormasligi uchun!)
+    const leftHalf = tSeq.items.length ? tSeq.width / 2 : 16;
+    const rightHalf = fSeq.items.length ? fSeq.width / 2 : 16;
+    const dLeft = Math.max(IF_W / 2 + 26, leftHalf + 18);
+    const dRight = Math.max(IF_W / 2 + 26, rightHalf + 18);
+    const extentLeft = dLeft + leftHalf + 14;
+    const extentRight = dRight + rightHalf + 14;
+    const width = 2 * Math.max(extentLeft, extentRight);
     const branchH = Math.max(tSeq.height, fSeq.height, 20);
-    const height = IF_H + V_GAP + branchH + 24;
-    return { type: "if", node, tSeq, fSeq, d, width, height };
+    const height = IF_H + V_GAP + branchH + 22;
+    return { type: "if", node, tSeq, fSeq, dLeft, dRight, width, height };
   }
 
   if (t === "while" || t === "for" || t === "loop") {
     const bodySeq = measureSequence(node.body || []);
-    const width = Math.max(LOOP_W + 70, bodySeq.width + 80);
+    const width = Math.max(LOOP_W + 76, bodySeq.width + 86);
     const bodyH = bodySeq.items.length ? bodySeq.height : 0;
     const height = LOOP_H + V_GAP + bodyH + 34;
     return { type: "loop", node, bodySeq, width, height };
   }
 
   const known = ["terminal", "input", "output"];
-  return { type: known.includes(t) ? t : "assign", node, width: NODE_W + 20, height: NODE_H };
+  const txt = node.text || node.condition || "";
+  const lines = wrapWords(txt, 25);
+  const boxH = lines.length >= 3 ? NODE_H + 14 : NODE_H;
+  return { type: known.includes(t) ? t : "assign", node, width: NODE_W + 20, height: boxH };
 }
 
 function esc(s) {
@@ -361,8 +361,8 @@ function esc(s) {
 
 function renderFlowgorithmSVG(nodes) {
   const tree = measureSequence(nodes);
-  svgW = Math.max(tree.width + 60, 300);
-  svgH = tree.height + 70;
+  svgW = Math.max(tree.width + 48, 320);
+  svgH = tree.height + 64;
   const out = [];
 
   function drawArrow(x1, y1, x2, y2) {
@@ -371,7 +371,7 @@ function renderFlowgorithmSVG(nodes) {
   function drawLine(x1, y1, x2, y2) {
     out.push('<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#334155" stroke-width="2.2"/>');
   }
-  function drawText(cx, cy, text, color, maxChars = 26) {
+  function drawText(cx, cy, text, color, maxChars = 25) {
     let lines = wrapWords(text, maxChars);
     if (lines.length > 3) {
       let third = lines.slice(2).join(" ");
@@ -404,7 +404,8 @@ function renderFlowgorithmSVG(nodes) {
 
   function renderItem(m, cx, y) {
     const x = cx - NODE_W / 2;
-    const cy = y + NODE_H / 2;
+    const bh = m.height || NODE_H;
+    const cy = y + bh / 2;
 
     if (m.type === "terminal") {
       const c = COLORS.terminal;
@@ -414,7 +415,7 @@ function renderFlowgorithmSVG(nodes) {
     else if (m.type === "input" || m.type === "output") {
       const c = m.type === "input" ? COLORS.input : COLORS.output;
       const sk = 18;
-      const pts = (x + sk) + "," + y + " " + (x + NODE_W) + "," + y + " " + (x + NODE_W - sk) + "," + (y + NODE_H) + " " + x + "," + (y + NODE_H);
+      const pts = (x + sk) + "," + y + " " + (x + NODE_W) + "," + y + " " + (x + NODE_W - sk) + "," + (y + bh) + " " + x + "," + (y + bh);
       out.push('<polygon points="' + pts + '" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
       drawText(cx, cy, m.node.text || m.node.condition, c.text);
     }
@@ -425,14 +426,14 @@ function renderFlowgorithmSVG(nodes) {
       out.push('<polygon points="' + pts + '" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
       drawText(cx, dcy, m.node.condition || m.node.text, c.text, 20);
 
-      const leftCx = cx - m.d;
-      const rightCx = cx + m.d;
+      const leftCx = cx - m.dLeft;
+      const rightCx = cx + m.dRight;
       const branchStartY = y + IF_H + V_GAP;
       const mergeY = y + m.height;
 
       // Ha (chap)
       drawLine(cx - IF_W / 2, dcy, leftCx, dcy);
-      label((cx - IF_W / 2 + leftCx) / 2, dcy - 7, "Ha", "#15803d");
+      label(cx - IF_W / 2 - 14, dcy - 6, "Ha", "#15803d");
       if (m.tSeq.items.length > 0) {
         drawArrow(leftCx, dcy, leftCx, branchStartY);
         renderSeq(m.tSeq, leftCx, branchStartY);
@@ -443,7 +444,7 @@ function renderFlowgorithmSVG(nodes) {
 
       // Yo'q (o'ng)
       drawLine(cx + IF_W / 2, dcy, rightCx, dcy);
-      label((cx + IF_W / 2 + rightCx) / 2, dcy - 7, "Yo'q", "#b91c1c");
+      label(cx + IF_W / 2 + 16, dcy - 6, "Yo'q", "#b91c1c");
       if (m.fSeq.items.length > 0) {
         drawArrow(rightCx, dcy, rightCx, branchStartY);
         renderSeq(m.fSeq, rightCx, branchStartY);
@@ -485,14 +486,14 @@ function renderFlowgorithmSVG(nodes) {
       // Chiqish (o'ngdan)
       const rightExitX = cx + m.width / 2 - 14;
       drawLine(cx + hw, lcy, rightExitX, lcy);
-      label(cx + hw + 20, lcy - 6, "Yo'q", "#b91c1c");
+      label(cx + hw + 18, lcy - 6, "Yo'q", "#b91c1c");
       drawLine(rightExitX, lcy, rightExitX, bottomY);
       drawLine(rightExitX, bottomY, cx, bottomY);
       out.push('<circle cx="' + cx + '" cy="' + bottomY + '" r="4" fill="#334155"/>');
     }
     else {
       const c = COLORS.assign;
-      out.push('<rect x="' + x + '" y="' + y + '" width="' + NODE_W + '" height="' + NODE_H + '" rx="6" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
+      out.push('<rect x="' + x + '" y="' + y + '" width="' + NODE_W + '" height="' + bh + '" rx="6" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
       drawText(cx, cy, m.node.text || m.node.condition, c.text);
     }
   }
@@ -525,7 +526,6 @@ function switchTab(tab, el) {
 function downloadPNG() {
   const svgEl = document.getElementById("flow-svg");
   if (!svgEl) return;
-  // PNG har doim to'liq o'lchamda saqlanadi (masshtabdan qat'i nazar)
   const clone = svgEl.cloneNode(true);
   clone.setAttribute("width", svgW);
   clone.setAttribute("height", svgH);
