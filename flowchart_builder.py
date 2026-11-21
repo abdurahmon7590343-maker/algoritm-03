@@ -310,7 +310,7 @@ def _convert(stmts, func_names) -> list:
                     continue
                 else:
                     a = _expr(call.func.value)
-                    nodes.append({"type": "assign", "text": f"{a} = {a} + [{_expr(arg)}]"})
+                    nodes.append({"type": "assign", "text": f"{a} ga {_expr(arg)} qo'shish"})
             elif _has_input(call):
                 nodes += _input_nodes([_expr(call.func.value)] if is_attr else [])
             else:
