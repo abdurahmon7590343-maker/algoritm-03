@@ -28,6 +28,7 @@ WEBAPP_URL = (
 PDF_PATH = os.getenv("PDF_PATH", "BLACKCURSE.pdf")
 PDF_BOB1_PATH = os.getenv("PDF_BOB1_PATH", "BLACKCURSE1.pdf")
 PROBLEMS_JSON = os.getenv("PROBLEMS_JSON", "problems.json")
+PROBLEMS_BOB1_JSON = os.getenv("PROBLEMS_BOB1_JSON", "problems_bob1.json")
 PORT = int(os.getenv("PORT", 8080))
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
@@ -63,6 +64,7 @@ SECTION_NAMES = {
     "5.6": "§-5.6. Matrisalarni tuzish",
     "5.7": "§-5.7. Matrisalar algebrasi",
 }
+
 
 # ================= PDF VA JSON PARSERLAR =================
 def _parse_numbered_block(sec_body: str, prefix: str = "") -> dict:
@@ -163,9 +165,24 @@ def load_problems_from_pdf(pdf_path: str):
 
 
 def load_problems():
-    load_bob1_from_pdf(PDF_BOB1_PATH)
-
     base = os.path.dirname(os.path.abspath(__file__))
+
+    # 1) I bob (avval tozalangan problems_bob1.json, bo'lmasa PDF)
+    p1 = PROBLEMS_BOB1_JSON if os.path.isabs(PROBLEMS_BOB1_JSON) else os.path.join(base, PROBLEMS_BOB1_JSON)
+    if os.path.exists(p1):
+        try:
+            with open(p1, "r", encoding="utf-8") as f:
+                data1 = json.load(f)
+            for sec, probs in data1.items():
+                PROBLEMS_DB[sec] = {str(k): v for k, v in probs.items()}
+            print(f"problems_bob1.json o'qildi: {sum(len(v) for v in data1.values())} ta masala")
+        except Exception as e:
+            print(f"problems_bob1.json xatosi: {e}. PDF ishlatiladi.")
+            load_bob1_from_pdf(PDF_BOB1_PATH)
+    else:
+        load_bob1_from_pdf(PDF_BOB1_PATH)
+
+    # 2) V bob (problems.json, bo'lmasa PDF)
     path = PROBLEMS_JSON if os.path.isabs(PROBLEMS_JSON) else os.path.join(base, PROBLEMS_JSON)
     if os.path.exists(path):
         try:
@@ -174,7 +191,7 @@ def load_problems():
             HINTS.update(data.pop("_hints", {}) or {})
             for sec, probs in data.items():
                 PROBLEMS_DB[sec] = {str(k): v for k, v in probs.items()}
-            print(f"Jami masalalar: {sum(len(v) for v in PROBLEMS_DB.values())} ta")
+            print(f"Jami yuklangan masalalar: {sum(len(v) for v in PROBLEMS_DB.values())} ta")
             return
         except Exception as e:
             print(f"problems.json o'qishda xato: {e}. PDF ishlatiladi.")
@@ -191,39 +208,37 @@ def clean_json_text(raw_text: str) -> str:
 
 
 SYSTEM_PROMPT = r"""
-Sen matematika va informatika o'qituvchisisanki, talaba daftariga yozgandek ENG TOZA, SODDA va QISQA matematik Python kodi yozasan.
+Sen matematika va informatika o'qituvchisisanki, talaba daftariga yozgandek ENG TOZA, SODDA va MANTIQIY matematik Python kodi yozasan.
 Shu koddan avtomatik ravishda blok-sxema chiziladi. Faqat sof JSON qaytar:
 {"explanation": "...", "input_format": "...", "test_input": "...", "code_python": "..."}
 
 QAT'IY QOIDALAR:
 1. O'ZGARUVCHILAR (ENG MUHIM):
-   - FAQAT 1-2 harfli matematik nomlar ishlat: a, b, c, d, d1, d2, d3, n, m, k, s, p, q, i, j, x, y, z, r, t, u, v, w, N, M, K, R, A, B.
+   - FAQAT 1-2 harfli matematik nomlar ishlat: a, b, c, d, d1, d2, d3, n, m, k, s, p, q, r, i, j, x, y, z, t, u, v, w, N, M, K, R, A, B.
    - 3 va undan ko'p harfli inglizcha nomlar (sequence, result, count, visited, found, temp, flag, total, ans, num, mid, pos, arr, cur) QAT'IY TAQIQLANADI!
-2. ORTIQCHA BELGILASH VA FUNKSIYALARSIZ:
-   - Keraksiz oraliq o'zgaruvchilar (t1, t2, temp, flag) yaratma; formulani to'g'ridan-to'g'ri bitta qatorda yoz.
+2. ORTIQCHA FUNKSIYALARSIZ, LEKIN MANTIQIY BO'LAKLANGAN KOD:
+   - Oddiy qisqa formulani bitta qatorda yoz (masalan: s = (a + b) / 2).
+   - Katta, bir nechta kasr yoki qismdan iborat arifmetik ifodalarni (§-1.1, §-1.2 kabi) HECH QACHON bitta uzun `s = ...` qatoriga tiqma!
+     Har bir asosiy kasr yoki takrorlanuvchi qismni alohida qisqa matematik harfda (t, p, q, r yoki u, v, w) hisoblab, oxirida `s = p - q + r` ko'rinishida jamla.
+   - Masalada "darajaga ko'tarish amalidan foydalanmasdan" deyilsa, `**` va `pow` ISHLATMA: kvadrat uchun `t * t`, kub uchun `d * d * d` yoz (takroriy qavsni avval `t = ...` qilib ol, ikki marta ko'chirib yozma).
    - TAQIQLANADI: def, class, lambda, break, continue, True, False, while True, .append(), .pop(), .sort(), .reverse(), .split(), .join(), sum(), min(), max(), sorted(), map(), zip(), enumerate(), round(), pow(), list(), dict(), set(), tuple().
    - Agar 1.8 (matnli masalalar) yoki 5.1.31 bo'lmasa: len() va str() ham TAQIQLANADI!
-   - Massiv kerak bo'lsa `a = [0] * n` deb e'lon qil (indeks bilan yoz, .append() ISHLATMA).
-   - Matritsa kerak bo'lsa bitta qatorda `A = [[0] * m for i in range(n)]` deb e'lon qil.
+   - Massiv kerak bo'lsa `a = [0] * n` (indeks bilan yoz, .append() ISHLATMA), matritsa kerak bo'lsa `A = [[0] * m for i in range(n)]` deb e'lon qil.
    - Kutubxona faqat juda zarur bo'lsa (sin, cos, tan, log, exp, sqrt, pi) `from math import ...` ishlat.
 3. KIRITISH VA CHIQARISH:
    - Har bir kiritiladigan qiymat: `n = int(input("n = "))` yoki `x = float(input("x = "))`.
    - Agar masalada barcha sonlar aniq berilgan bo'lsa (masalan [200, 300] oraliq) — input() ISHLATMA.
    - Natijani ortiqcha so'zlarsiz chiqar: `print(s)` yoki `print("Ha")` / `print("Yo'q")`.
-4. YOMON VA YAXSHI NAMUNA:
-   YOMON:
-     sequence = []
-     sequence.append(d1)
-     sequence.append(d2)
-     result = sum(sequence)
-     print("Natija:", result)
-   YAXSHI:
-     a = [0] * 1005
-     a[1] = d1
-     a[2] = d2
-     s = d1 + d2
-     print(s)
-5. TEZLIK: Cheksiz yoki sekin sikl yozma. `test_input` ga kichik va tez ishlaydigan namuna qiymatlar ber (masalan n=5, massiv o'lchami 3-4).
+4. ARIFMETIK IFODA UCHUN YAXSHI NAMUNA:
+   t = 1 - (a + 2.9 * b)
+   p = (t * t) / (a * b - d - 1.45)
+   q = ((c - a) / d) / (a * (b + c * c))
+   r = a / (1 + 2 / c)
+   s = p - q + r
+   print(s)
+5. TEZLIK VA XAVFSIZ TEST:
+   - Cheksiz yoki sekin sikl yozma.
+   - `test_input` ga kichik, tez ishlaydigan va XATOSIZ (0 ga bo'linmaydigan, log/ildiz ichi musbat chiqadigan) namuna qiymatlar ber (masalan n=5, yoki a=2.5, b=3.1, c=1.8, d=0.7).
 6. Izohlar (#) YOZMA.
 7. JSON maydonlari:
    - "explanation": 1-2 gapli qisqa o'zbekcha tushuntirish.
@@ -275,7 +290,6 @@ def check_code_safety(code: str):
 
 
 def _is_zero_matrix_comp(node: ast.ListComp) -> bool:
-    """Faqat [[0] * m for i in range(n)] ko'rinishidagi matritsa e'loniga ruxsat."""
     if len(node.generators) != 1 or node.generators[0].ifs:
         return False
     elt = node.elt
@@ -285,7 +299,6 @@ def _is_zero_matrix_comp(node: ast.ListComp) -> bool:
 
 
 def check_code_style(tree, sec: str, num: str):
-    """Faqat 1-2 harfli matematik nomlar va keraksiz funksiyalarsiz kodni qat'iy tekshiradi."""
     bad = set()
     allow_str = (sec == "1.8" or f"{sec}.{num}" == "5.1.31")
     banned_funcs = {"list", "dict", "set", "tuple", "map", "filter", "zip",
@@ -305,6 +318,8 @@ def check_code_style(tree, sec: str, num: str):
             bad.add("break/continue o'rniga toza sikl sharti yoz")
         elif isinstance(n, ast.Constant) and isinstance(n.value, bool):
             bad.add("True/False o'rniga 1/0 ishlat")
+        elif sec == "1.1" and isinstance(n, ast.BinOp) and isinstance(n.op, ast.Pow):
+            bad.add("§-1.1 da darajaga ko'tarish (**) taqiqlangan, oddiy ko'paytirish (a*a, d*d*d) ishlat")
         elif isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
             if not VAR_RE.match(n.id):
                 bad.add(f"uzun o'zgaruvchi '{n.id}' taqiqlangan (faqat 1-2 harfli matematik nom ishlat)")
@@ -381,6 +396,7 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
     extra = ""
     result = None
     candidate = None
+    fallback = None
     warning = ""
 
     for attempt in range(4):
@@ -416,6 +432,7 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
                 "nodes": nodes,
                 "problem_text": prob_text,
             }
+            fallback = cand
 
             await verify_run(code, test_input, code_has_input(tree))
             candidate = cand
@@ -426,7 +443,7 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
         except Exception as e:
             last_err = e
             print(f"Generatsiya xatosi (urinish {attempt + 1}): {e}")
-            if candidate is not None and isinstance(e, ValueError):
+            if isinstance(e, ValueError):
                 warning = str(e)
             extra = (
                 f"\nOLDINGI JAVOBDA XATO BO'LDI: {e}\n"
@@ -434,11 +451,11 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
             )
             await asyncio.sleep(1.0)
 
-    if result is None and candidate is not None:
-        if warning and not warning.startswith("USLUB"):
-            candidate["explanation"] = (candidate.get("explanation", "") +
-                                        f"\n\n⚠️ Avtomatik tekshiruv: {warning}").strip()
-        result = candidate
+    if result is None:
+        result = candidate or fallback
+        if result is not None and warning and not warning.startswith("USLUB") and candidate is None:
+            result["explanation"] = (result.get("explanation", "") +
+                                     f"\n\n⚠️ Avtomatik tekshiruv: {warning}").strip()
 
     if result is None:
         raise RuntimeError(f"AI to'g'ri javob bera olmadi: {last_err}")
@@ -479,7 +496,7 @@ def get_sections_keyboard():
 def get_problems_keyboard(sec: str):
     builder = InlineKeyboardBuilder()
     probs = PROBLEMS_DB.get(sec, {})
-    nums = sorted(probs.keys(), key=lambda x: int(x)) if probs else [str(i) for i in range(1, 33)]
+    nums = sorted(probs.keys(), key=lambda x: int(x)) if probs else [str(i) for i in range(1, 26)]
 
     for n in nums:
         builder.button(text=f"📌 #{n}", callback_data=f"prob:{sec}:{n}")
@@ -567,7 +584,7 @@ async def handle_api_problems(request):
 
 
 async def handle_api_flowchart(request):
-    sec = request.query.get("sec", "5.1")
+    sec = request.query.get("sec", "1.1")
     num = request.query.get("num", "1")
     force = request.query.get("force", "0")
     if force == "1":
