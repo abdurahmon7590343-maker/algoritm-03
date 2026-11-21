@@ -16,7 +16,7 @@
   select { flex: 1; min-width: 0; }
   button.btn-primary { background: #0284c7; border-color: #38bdf8; font-weight: 600; cursor: pointer; }
 
-  .problem-banner { background: #1e293b; padding: 10px 14px; font-size: 13px; line-height: 1.45; border-bottom: 1px solid #334155; max-height: 90px; overflow-y: auto; color: #e2e8f0; }
+  .problem-banner { background: #1e293b; padding: 10px 14px; font-size: 13px; line-height: 1.45; border-bottom: 1px solid #334155; max-height: 96px; overflow-y: auto; color: #e2e8f0; }
 
   .tabs { display: flex; background: #0f172a; border-bottom: 1px solid #334155; }
   .tab { flex: 1; text-align: center; padding: 11px; font-size: 13px; font-weight: 600; color: #94a3b8; cursor: pointer; border-bottom: 2px solid transparent; }
@@ -130,13 +130,13 @@ function showLoader(show, text) {
 async function init() {
   try {
     const urlParams = new URLSearchParams(window.location.search);
-    const initSec = urlParams.get("sec") || "5.1";
-    const initNum = urlParams.get("num") || "1";
-
     const res = await fetch("/api/problems");
     const data = await res.json();
     allProblems = data.problems || {};
     const sections = data.sections || {};
+
+    const initSec = urlParams.get("sec") || Object.keys(sections)[0] || "1.1";
+    const initNum = urlParams.get("num") || "1";
 
     const secSelect = document.getElementById("secSelect");
     for (const [code, title] of Object.entries(sections)) {
@@ -163,7 +163,7 @@ function populateNumbers(sec, selectedNum) {
   const probs = allProblems[sec] || {};
   const keys = Object.keys(probs).length
     ? Object.keys(probs).sort((a, b) => Number(a) - Number(b))
-    : Array.from({ length: 30 }, (_, i) => String(i + 1));
+    : Array.from({ length: 25 }, (_, i) => String(i + 1));
   for (const k of keys) {
     const opt = document.createElement("option");
     opt.value = k;
@@ -285,8 +285,15 @@ function fallbackCopy(text, cb) {
   cb();
 }
 
-function wrapWords(text, maxChars = 24) {
-  const words = String(text || "").trim().split(/\s+/);
+function wrapWords(text, maxChars = 28) {
+  const rawWords = String(text || "").trim().split(/\s+/);
+  const words = [];
+  for (const w of rawWords) {
+    if (w.length <= maxChars) words.push(w);
+    else {
+      for (let i = 0; i < w.length; i += maxChars) words.push(w.slice(i, i + maxChars));
+    }
+  }
   const lines = [];
   let current = "";
   for (const w of words) {
@@ -298,14 +305,16 @@ function wrapWords(text, maxChars = 24) {
   return lines.length ? lines : [""];
 }
 
-// ================= GRAFIK MOTOR (ASSIMETRIK O'LCHASH) =================
-const NODE_W = 200;
+// ================= GRAFIK MOTOR (AVTO-O'LCHAMLI VA ASSIMETRIK) =================
+const NODE_W = 240;
 const NODE_H = 54;
 const V_GAP = 32;
-const IF_H = 84;
-const IF_W = NODE_W + 50;
-const LOOP_H = 62;
-const LOOP_W = NODE_W + 26;
+const IF_H = 96;
+const IF_W = NODE_W + 60;
+const LOOP_H = 66;
+const LOOP_W = NODE_W + 30;
+const WHILE_H = 88;
+const WHILE_W = NODE_W + 50;
 
 function measureSequence(nodes) {
   let leftW = (NODE_W + 20) / 2;
@@ -331,6 +340,8 @@ function measureNode(node) {
     const fSeq = measureSequence(node.falseBranch || []);
     const hasT = tSeq.items.length > 0;
     const hasF = fSeq.items.length > 0;
+    const condLines = wrapWords(node.condition || node.text || "", 18);
+    const dH = Math.max(IF_H, condLines.length * 18 + 44);
 
     const leftShift = Math.max(IF_W / 2 + 24, hasT ? tSeq.rightW + 20 : 0);
     const rightShift = Math.max(IF_W / 2 + 24, hasF ? fSeq.leftW + 20 : 0);
@@ -338,25 +349,36 @@ function measureNode(node) {
     const leftW = Math.max(IF_W / 2 + 12, leftShift + (hasT ? tSeq.leftW : 14));
     const rightW = Math.max(IF_W / 2 + 12, rightShift + (hasF ? fSeq.rightW : 14));
     const branchH = Math.max(tSeq.height, fSeq.height, 20);
-    const height = IF_H + V_GAP + branchH + 24;
+    const height = dH + V_GAP + branchH + 24;
 
-    return { type: "if", node, tSeq, fSeq, leftShift, rightShift, leftW, rightW, width: leftW + rightW, height };
+    return { type: "if", node, lines: condLines, dH, tSeq, fSeq, leftShift, rightShift, leftW, rightW, width: leftW + rightW, height };
   }
 
   if (t === "while" || t === "for" || t === "loop") {
+    const isWhile = (t === "while");
     const bodySeq = measureSequence(node.body || []);
     const hasBody = bodySeq.items.length > 0;
-    const leftW = Math.max(LOOP_W / 2 + 36, hasBody ? bodySeq.leftW + 38 : 0);
-    const rightW = Math.max(LOOP_W / 2 + 36, hasBody ? bodySeq.rightW + 38 : 0);
-    const bodyH = hasBody ? bodySeq.height : 0;
-    const height = LOOP_H + V_GAP + bodyH + 34;
+    const condLines = wrapWords(node.condition || node.text || "", isWhile ? 18 : 24);
+    const boxW = isWhile ? WHILE_W : LOOP_W;
+    const boxH = isWhile
+      ? Math.max(WHILE_H, condLines.length * 18 + 42)
+      : Math.max(LOOP_H, condLines.length * 17 + 26);
 
-    return { type: "loop", node, bodySeq, leftW, rightW, width: leftW + rightW, height };
+    const leftW = Math.max(boxW / 2 + 38, hasBody ? bodySeq.leftW + 38 : 0);
+    const rightW = Math.max(boxW / 2 + 38, hasBody ? bodySeq.rightW + 38 : 0);
+    const bodyH = hasBody ? bodySeq.height : 0;
+    const height = boxH + V_GAP + bodyH + 34;
+
+    return { type: "loop", isWhile, node, lines: condLines, boxW, boxH, bodySeq, leftW, rightW, width: leftW + rightW, height };
   }
 
   const known = ["terminal", "input", "output"];
+  const kind = known.includes(t) ? t : "assign";
+  const maxC = kind === "assign" ? 28 : 24;
+  const lines = wrapWords(node.text || node.condition || "", maxC);
+  const h = kind === "terminal" ? NODE_H : Math.max(NODE_H, lines.length * 17 + 22);
   const half = (NODE_W + 20) / 2;
-  return { type: known.includes(t) ? t : "assign", node, leftW: half, rightW: half, width: NODE_W + 20, height: NODE_H };
+  return { type: kind, node, lines, leftW: half, rightW: half, width: NODE_W + 20, height: h };
 }
 
 function esc(s) {
@@ -365,7 +387,7 @@ function esc(s) {
 
 function renderFlowgorithmSVG(nodes) {
   const tree = measureSequence(nodes);
-  svgW = Math.max(tree.leftW + tree.rightW + 60, 300);
+  svgW = Math.max(tree.leftW + tree.rightW + 60, 320);
   svgH = tree.height + 70;
   const startCx = (svgW - (tree.leftW + tree.rightW)) / 2 + tree.leftW;
   const out = [];
@@ -376,15 +398,9 @@ function renderFlowgorithmSVG(nodes) {
   function drawLine(x1, y1, x2, y2) {
     out.push('<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#334155" stroke-width="2.2"/>');
   }
-  function drawText(cx, cy, text, color, maxChars = 26) {
-    let lines = wrapWords(text, maxChars);
-    if (lines.length > 3) {
-      let third = lines.slice(2).join(" ");
-      if (third.length > maxChars) third = third.slice(0, maxChars - 1) + "…";
-      lines = [lines[0], lines[1], third];
-    }
-    const size = lines.length === 1 ? 13.5 : 12;
-    const lh = 15;
+  function drawLines(cx, cy, lines, color) {
+    const size = lines.length <= 2 ? 13.5 : 12.5;
+    const lh = 17;
     const startY = cy - ((lines.length - 1) * lh) / 2 + 4.5;
     lines.forEach((ln, i) => {
       out.push('<text x="' + cx + '" y="' + (startY + i * lh) + '" text-anchor="middle" font-size="' + size + '" font-weight="600" fill="' + color + '">' + esc(ln) + '</text>');
@@ -409,30 +425,29 @@ function renderFlowgorithmSVG(nodes) {
 
   function renderItem(m, cx, y) {
     const x = cx - NODE_W / 2;
-    const cy = y + NODE_H / 2;
 
     if (m.type === "terminal") {
       const c = COLORS.terminal;
-      out.push('<rect x="' + (x + 25) + '" y="' + y + '" width="' + (NODE_W - 50) + '" height="' + (NODE_H - 6) + '" rx="24" ry="24" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
-      drawText(cx, y + (NODE_H - 6) / 2, m.node.text, c.text);
+      out.push('<rect x="' + (x + 35) + '" y="' + y + '" width="' + (NODE_W - 70) + '" height="' + m.height + '" rx="27" ry="27" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
+      drawLines(cx, y + m.height / 2, m.lines, c.text);
     }
     else if (m.type === "input" || m.type === "output") {
       const c = m.type === "input" ? COLORS.input : COLORS.output;
       const sk = 18;
-      const pts = (x + sk) + "," + y + " " + (x + NODE_W) + "," + y + " " + (x + NODE_W - sk) + "," + (y + NODE_H) + " " + x + "," + (y + NODE_H);
+      const pts = (x + sk) + "," + y + " " + (x + NODE_W) + "," + y + " " + (x + NODE_W - sk) + "," + (y + m.height) + " " + x + "," + (y + m.height);
       out.push('<polygon points="' + pts + '" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
-      drawText(cx, cy, m.node.text || m.node.condition, c.text);
+      drawLines(cx, y + m.height / 2, m.lines, c.text);
     }
     else if (m.type === "if") {
       const c = COLORS.if;
-      const dcy = y + IF_H / 2;
-      const pts = cx + "," + y + " " + (cx + IF_W / 2) + "," + dcy + " " + cx + "," + (y + IF_H) + " " + (cx - IF_W / 2) + "," + dcy;
+      const dcy = y + m.dH / 2;
+      const pts = cx + "," + y + " " + (cx + IF_W / 2) + "," + dcy + " " + cx + "," + (y + m.dH) + " " + (cx - IF_W / 2) + "," + dcy;
       out.push('<polygon points="' + pts + '" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
-      drawText(cx, dcy, m.node.condition || m.node.text, c.text, 20);
+      drawLines(cx, dcy, m.lines, c.text);
 
       const leftCx = cx - m.leftShift;
       const rightCx = cx + m.rightShift;
-      const branchStartY = y + IF_H + V_GAP;
+      const branchStartY = y + m.dH + V_GAP;
       const mergeY = y + m.height;
 
       // Ha (chap)
@@ -462,20 +477,26 @@ function renderFlowgorithmSVG(nodes) {
     }
     else if (m.type === "loop") {
       const c = COLORS.loop;
-      const lcy = y + LOOP_H / 2;
-      const hw = LOOP_W / 2;
-      const pts = (cx - hw + 18) + "," + y + " " + (cx + hw - 18) + "," + y + " " + (cx + hw) + "," + lcy + " " + (cx + hw - 18) + "," + (y + LOOP_H) + " " + (cx - hw + 18) + "," + (y + LOOP_H) + " " + (cx - hw) + "," + lcy;
+      const lcy = y + m.boxH / 2;
+      const hw = m.boxW / 2;
+      let pts;
+      if (m.isWhile) {
+        pts = cx + "," + y + " " + (cx + hw) + "," + lcy + " " + cx + "," + (y + m.boxH) + " " + (cx - hw) + "," + lcy;
+      } else {
+        pts = (cx - hw + 18) + "," + y + " " + (cx + hw - 18) + "," + y + " " + (cx + hw) + "," + lcy + " " +
+              (cx + hw - 18) + "," + (y + m.boxH) + " " + (cx - hw + 18) + "," + (y + m.boxH) + " " + (cx - hw) + "," + lcy;
+      }
       out.push('<polygon points="' + pts + '" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
-      drawText(cx, lcy, m.node.condition || m.node.text, c.text, 22);
+      drawLines(cx, lcy, m.lines, c.text);
 
       const hasBody = m.bodySeq.items.length > 0;
-      const bodyStartY = y + LOOP_H + V_GAP;
-      const bodyEndY = hasBody ? bodyStartY + m.bodySeq.height : y + LOOP_H;
+      const bodyStartY = y + m.boxH + V_GAP;
+      const bodyEndY = hasBody ? bodyStartY + m.bodySeq.height : y + m.boxH;
       const bottomY = y + m.height;
 
       if (hasBody) {
-        drawArrow(cx, y + LOOP_H, cx, bodyStartY);
-        label(cx + 16, y + LOOP_H + 18, "Ha", "#15803d");
+        drawArrow(cx, y + m.boxH, cx, bodyStartY);
+        label(cx + 18, y + m.boxH + 18, "Ha", "#15803d");
         renderSeq(m.bodySeq, cx, bodyStartY);
       }
 
@@ -495,8 +516,8 @@ function renderFlowgorithmSVG(nodes) {
     }
     else {
       const c = COLORS.assign;
-      out.push('<rect x="' + x + '" y="' + y + '" width="' + NODE_W + '" height="' + NODE_H + '" rx="6" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
-      drawText(cx, cy, m.node.text || m.node.condition, c.text);
+      out.push('<rect x="' + x + '" y="' + y + '" width="' + NODE_W + '" height="' + m.height + '" rx="6" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
+      drawLines(cx, y + m.height / 2, m.lines, c.text);
     }
   }
 
