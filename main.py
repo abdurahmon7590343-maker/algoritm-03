@@ -118,30 +118,37 @@ def clean_json_text(raw_text: str) -> str:
     return text.strip()
 
 SYSTEM_PROMPT = r"""
-Sen universitet talabalari uchun klassik Flowgorithm blok-sxemasiga 100% mos keladigan, eng sodda va toza Python dasturlarini yozuvchi ustozsan.
-Berilgan masalani TO'G'RI va TEZ yechadigan dastur yoz va faqat sof JSON qaytar:
+Sen universitet talabalari uchun Flowgorithm blok-sxemasiga aynan mos keladigan, eng sodda va odam yozgandek toza Python dasturlarini yozuvchi ustozsan.
+Berilgan masalani TO'G'RI va TEZ ishlaydigan qilib yechadigan dastur yoz va faqat sof JSON qaytar:
 {"explanation": "...", "input_format": "...", "test_input": "...", "code_python": "..."}
 
+MASALA MATNIDAGI BELGILAR: ^ — daraja (2^200 = 2 ning 200-darajasi), _ yoki pastki indeks — indeks (a_i, d₀),
+n! — faktorial, ≤ ≥ — taqqoslash. Masala shartini ehtiyotkorlik bilan o'qi va to'liq yech.
+
 QAT'IY QOIDALAR:
-1. O'ZGARUVCHILAR NOMI (ENG MUHIM):
-   - Faqat 1-2 harfli sof matematik o'zgaruvchilarni ishlat: `n, m, k, s, i, j, a, b, c, d, t, x, y, p, q, r, l, u, v, f, g, R, A, B, C`.
-   - INGLIZCHA SO'ZLAR QAT'IYAN TAQIQLANADI: `count, result, temp, flag, ans, max_val, min_val, lo, hi, mid, pos, mask, carry, is_prime, found, num, arr` kabi so'zlarni UMUMAN ISHLATMA!
-2. HAR BIR QATORDA FAQAT BITTA SODDA AMAL BO'LSIN:
-   - Ruxsat: oddiy `for`, `while`, `if`, `elif`, `else`, o'zlashtirish (`=`), arifmetika (`+ - * / // % **`), taqqoslash, `and / or / not`, `print`, `input`, `int()`, `float()`.
-   - TAQIQ: `def`, `class`, `lambda`, list comprehension (`[x for x in ...]`), kesim (`a[::-1]`), `a, b = b, a` (o'rniga `t = a`, `a = b`, `b = t` yoz), `a = b = 0`, `str()`, `.split()`, `map()`, `True/False` (o'rniga `1` va `0` ishlat), `while True`, `sum()`, `max()`, `min()`, ` sorted()`, `.sort()`.
-3. KIRITISH VA CHIQARISH:
-   - Har bir o'zgaruvchini alohida qatorda, tushunarli prompt bilan kirit: `n = int(input("n = "))`.
-   - Massiv kiritish: avval `a = [0] * n`, so'ng `for i in range(n): a[i] = int(input("a[i] = "))`.
-   - Matritsa kiritish: avval `a = []`, `for i in range(n): a.append([0] * m)`, so'ng ichma-ich `for` bilan `a[i][j] = float(input("a[i][j] = "))`.
-   - Natijani chiqarishda uzun inglizcha yoki tushunarsiz matnlar yozma, faqat o'zgaruvchini yoki qisqa o'zbekcha so'zni chiqar: `print(s)` yoki `print("Ha")` / `print("Yo'q")`.
-4. RAQAMLAR BILAN ISHLASH:
-   - Sonning raqamlarini ajratish uchun `str()` ISHLATMA, faqat `% 10` va `// 10` amallarini `while` siklida ishlat.
-5. JSON MAYDONLARI:
-   - "explanation": Algoritmning qisqa va ravon o'zbekcha tushuntirishi (1-3 gap).
-   - "input_format": Kiritish tartibi (o'zbek tilida).
-   - "test_input": Dasturni tekshirish uchun namuna qiymatlar (`
-` bilan ajratilgan).
-   - "code_python": Toza, izohlarsiz (# siz) Python kodi.
+1. Dastur TO'LIQ bo'lsin: kiritish, hisoblash va chiqarish (print). Masalaning BARCHA bandlarini (a, b, c ...) bajar.
+2. HAR BIR QATORDA FAQAT BITTA AMAL: bitta input, bitta o'zlashtirish, bitta print.
+   Ruxsat: oddiy for / while / if / elif / else, o'zlashtirish (=, +=), arifmetika (+ - * / // % **), taqqoslash, and/or/not, print, input, int(), float().
+   TAQIQ: def, class, lambda, list comprehension, dict/set comprehension, .split(), list(map(...)).
+   Qiymatlarni almashtirish uchun qo'shimcha o'zgaruvchi ishlat: t = a, a = b, b = t (alohida qatorlarda).
+   Mantiqiy belgi (flag) uchun 1 va 0 ishlat.
+3. KUTUBXONA: odatda import KERAK EMAS. Faqat zarur bo'lsa (sin, cos, sqrt, pi, acos) `from math import ...` ishlat.
+4. O'ZGARUVCHILAR: qisqa matematik nomlar: n, m, k, s, i, j, a, b, c, d, t, x, y, p, q, R, A, B.
+5. KIRITISH: HAR BIR qiymat ALOHIDA input() bilan va qisqa prompt bilan kiritiladi:
+   `n = int(input("n = "))`, `x = float(input("x = "))`.
+   MASSIV: `a = [0] * n`, so'ng `for i in range(n): a[i] = int(input("a[i] = "))`.
+   MATRITSA: `a = []`, `for i in range(n): a.append([0] * m)`, so'ng ichma-ich for bilan `a[i][j] = float(input("a[i][j] = "))`.
+   Agar masalada kiritiladigan qiymat YO'Q bo'lsa (oraliq aniq berilgan: [200,300], uch xonali sonlar) — input ISHLATMA.
+   «Fayl» (f, g, h fayllar) so'zi bo'lsa — fayl o'rniga oddiy massiv ishlat.
+6. RAQAMLAR bilan ishlash: iloji boricha `x % 10` va `x // 10` bilan, sikl ichida yoz.
+7. Massivlarni tartiblash, yig'indi, maksimum kabilarni tayyor funksiyalarsiz o'zing sikl bilan yoz.
+8. TEZLIK: hech qachon cheksiz yoki sekin sikl yozma. Chegaralar katta bo'lsa (10^15, 2·10^9) davr topish, binar qidiruv, tez daraja yoki dinamik dasturlash ishlat.
+9. Izohlar (#) kerak emas. print da natijani tushunarli chiqar: `print("Natija:", s)`. "Mumkinmi? / bormi?" masalalarida `print("Ha")` yoki `print("Yo'q")`.
+10. Agar «YO'L-YO'RIQ» berilgan bo'lsa — aynan shu usulga amal qil.
+11. JSON maydonlari:
+    "explanation": 1-3 gapli sodda o'zbekcha tushuntirish;
+    "input_format": nimalarni qaysi tartibda kiritish kerakligi (kiritish bo'lmasa «Kiritish kerak emas»);
+    "test_input": dasturni sinash uchun KICHIK va TEZ ishlaydigan namuna kiritish (masalan, n=5, massiv o'lchami 3-4). HAR BIR input() uchun alohida qiymat, \n bilan ajratilgan. Kiritish bo'lmasa "".
 """
 
 def _call_gemini(prompt: str):
@@ -162,14 +169,8 @@ def _call_gemini(prompt: str):
 
 # ================= KODNI TEKSHIRISH =================
 ALLOWED_IMPORTS = {"math"}
-BANNED_NAMES = {
-    "open", "exec", "eval", "compile", "__import__", "globals", "locals",
-    "getattr", "setattr", "delattr", "vars", "breakpoint", "exit", "quit"
-}
-BANNED_ENGLISH_VARS = {
-    "count", "result", "temp", "flag", "max_coord", "r_squared", "is_prime",
-    "found", "answer", "total", "current", "prev", "next_val", "mid", "lo", "hi", "carry", "mask"
-}
+BANNED_NAMES = {"open", "exec", "eval", "compile", "__import__", "globals", "locals",
+                "getattr", "setattr", "delattr", "vars", "breakpoint", "exit", "quit"}
 
 def check_code_safety(code: str):
     tree = ast.parse(code)
@@ -188,29 +189,17 @@ def check_code_safety(code: str):
     return tree
 
 def check_code_style(tree):
+    """Faqat blok-sxema tuzilishini buzadigan konstruksiyalarni tekshiradi."""
     bad = set()
     for n in ast.walk(tree):
         if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Lambda, ast.GeneratorExp, ast.DictComp, ast.SetComp)):
             bad.add("def/class/lambda taqiqlangan")
         elif isinstance(n, ast.ListComp):
             bad.add("list comprehension taqiqlangan")
-        elif isinstance(n, ast.Subscript) and isinstance(n.slice, ast.Slice):
-            bad.add("kesim (a[::-1], a[1:3]) taqiqlangan")
-        elif isinstance(n, ast.Assign):
-            if len(n.targets) > 1:
-                bad.add("zanjirli o'zlashtirish (a = b = 0) taqiqlangan")
-            elif isinstance(n.targets[0], ast.Tuple):
-                bad.add("a, b = b, a kabi bir vaqtdagi o'zlashtirish taqiqlangan, t o'zgaruvchi ishlat")
-        elif isinstance(n, ast.Constant) and isinstance(n.value, bool):
-            bad.add("True/False o'rniga 1/0 ishlat")
-        elif isinstance(n, ast.Name) and n.id.lower() in BANNED_ENGLISH_VARS:
-            bad.add(f"'{n.id}' inglizcha o'zgaruvchi nomi taqiqlangan, qisqa matematik harf (s, k, t, l, r, m, u) ishlat")
         elif isinstance(n, ast.Call):
             f = n.func
-            if isinstance(f, ast.Name) and f.id in {"str", "list", "map", "sum", "sorted"}:
-                bad.add(f"{f.id}() taqiqlangan")
-            if isinstance(f, ast.Attribute) and f.attr in {"split", "sort", "join", "reverse"}:
-                bad.add(f".{f.attr}() taqiqlangan")
+            if isinstance(f, ast.Attribute) and f.attr in {"split"}:
+                bad.add(".split() taqiqlangan, qiymatlarni alohida input() bilan kirit")
     if bad:
         raise ValueError("USLUB: " + "; ".join(sorted(bad)))
 
@@ -240,7 +229,10 @@ async def verify_run(code: str, test_input: str, has_input: bool):
     try:
         r = await asyncio.to_thread(_run_sync, code, test_input if has_input else "")
     except subprocess.TimeoutExpired:
-        raise ValueError("Dastur 10 soniyada tugamadi (cheksiz yoki juda sekin sikl).")
+        raise ValueError(
+            "Dastur 10 soniyada tugamadi (cheksiz yoki sekin sikl). "
+            "Samaraliroq algoritm ishlat yoki test_input ni kichikroq ol."
+        )
     if r.returncode != 0:
         last = (r.stderr.strip().splitlines() or ["noma'lum xato"])[-1]
         if has_input and last.startswith(("EOFError", "ValueError")):
@@ -269,6 +261,7 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
     result = None
     candidate = None
     warning = ""
+
     for attempt in range(3):
         try:
             response = await asyncio.wait_for(
@@ -303,8 +296,11 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
                 "problem_text": prob_text,
             }
             candidate = cand
-            check_code_style(tree)
+
+            # Avval kodning ishlashini tekshiramiz, keyin uslubni
             await verify_run(code, test_input, code_has_input(tree))
+            check_code_style(tree)
+
             result = cand
             break
         except Exception as e:
@@ -314,16 +310,14 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
                 warning = str(e)
             extra = (
                 f"\nOLDINGI JAVOBDA XATO BO'LDI: {e}\n"
-                f"Qoidalarga qat'iy amal qilib, inglizcha o'zgaruvchilarsiz toza kod qaytar.\n"
+                f"Xatoni tuzatib, to'g'ri JSON va ishlaydigan kodni qaytar.\n"
             )
             await asyncio.sleep(1.0)
 
     if result is None and candidate is not None and warning:
         if not warning.startswith("USLUB"):
-            candidate["explanation"] = (
-                candidate.get("explanation", "")
-                + f"\n\n⚠️ Avtomatik tekshiruv ogohlantirishi: {warning}"
-            ).strip()
+            candidate["explanation"] = (candidate.get("explanation", "") +
+                                        f"\n\n⚠️ Avtomatik tekshiruv ogohlantirishi: {warning}").strip()
         result = candidate
 
     if result is None:
@@ -342,6 +336,8 @@ def load_index_html() -> str:
             return f.read()
     except FileNotFoundError:
         return "<h3>index.html topilmadi. Uni bot.py bilan bir papkaga qo'ying.</h3>"
+
+INDEX_HTML = load_index_html()
 
 # ================= TELEGRAM BOT HANDLERLARI =================
 def get_sections_keyboard():
@@ -425,7 +421,7 @@ async def cb_problem(callback: types.CallbackQuery):
 # ================= WEB SERVER =================
 async def handle_index(request):
     return web.Response(
-        text=load_index_html(),
+        text=INDEX_HTML,
         content_type="text/html",
         headers={"Cache-Control": "no-store"}
     )
@@ -461,7 +457,7 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
-    print(f"Web-server http://0.0.0.0:{PORT} da ishga tushdi! WEBAPP_URL: {WEBAPP_URL}")
+    print(f"Web-server [http://0.0.0.0](http://0.0.0.0):{PORT} da ishga tushdi! WEBAPP_URL: {WEBAPP_URL}")
 
     while True:
         try:
