@@ -17,7 +17,6 @@ from flowchart_builder import code_to_nodes, validate_flowchart_nodes
 
 # ================= RENDER VA MUHIT SOZLAMALARI =================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "BOT_TOKENINGIZNI_SHU_YERGA_YOZING")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "GEMINI_API_KEYINGIZNI_SHU_YERGA_YOZING")
 
 WEBAPP_URL = (
     os.getenv("WEBAPP_URL")
@@ -30,15 +29,27 @@ PDF_BOB1_PATH = os.getenv("PDF_BOB1_PATH", "BLACKCURSE1.pdf")
 PROBLEMS_JSON = os.getenv("PROBLEMS_JSON", "problems.json")
 PROBLEMS_BOB1_JSON = os.getenv("PROBLEMS_BOB1_JSON", "problems_bob1.json")
 PORT = int(os.getenv("PORT", 8080))
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+# Bir nechta API kalit (vergul bilan): GEMINI_API_KEYS="key1,key2,key3"
+# Yoki bitta kalit: GEMINI_API_KEY="key1"
+_raw_keys = os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_KEYS = [k.strip() for k in _raw_keys.split(",") if k.strip()]
+
+# Zaxira modellar ro'yxati: biri 429 bersa keyingisiga o'tadi
+_raw_models = os.getenv("GEMINI_MODELS") or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODELS = [m.strip() for m in _raw_models.split(",") if m.strip()]
+for _fallback_model in ("gemini-2.5-flash-lite", "gemini-2.0-flash"):
+    if _fallback_model not in GEMINI_MODELS:
+        GEMINI_MODELS.append(_fallback_model)
+
+_GEMINI_CLIENTS = [
+    genai.Client(api_key=k, http_options={"api_version": "v1beta"})
+    for k in GEMINI_API_KEYS
+]
+_key_idx = 0
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
-gemini_client = genai.Client(
-    api_key=GEMINI_API_KEY,
-    http_options={"api_version": "v1beta"}
-)
 
 PROBLEMS_DB = {}
 HINTS = {}
@@ -267,21 +278,52 @@ QAT'IY QOIDALAR:
 """
 
 
+def _is_quota_error(err: Exception) -> bool:
+    msg = str(err)
+    return (
+        "429" in msg
+        or "RESOURCE_EXHAUSTED" in msg
+        or "Quota exceeded" in msg
+        or "kunlik limiti tugadi" in msg
+    )
+
+
 def _call_gemini(prompt: str):
-    cfg = dict(
-        response_mime_type="application/json",
-        temperature=0.1,
-        max_output_tokens=8192,
-    )
-    try:
-        cfg["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=2048)
-    except Exception:
-        pass
-    return gemini_client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(**cfg)
-    )
+    global _key_idx
+    if not _GEMINI_CLIENTS:
+        raise RuntimeError("GEMINI_API_KEY yoki GEMINI_API_KEYS sozlanmagan")
+
+    last_err = None
+    for model_name in GEMINI_MODELS:
+        for step in range(len(_GEMINI_CLIENTS)):
+            idx = (_key_idx + step) % len(_GEMINI_CLIENTS)
+            client = _GEMINI_CLIENTS[idx]
+            cfg = dict(
+                response_mime_type="application/json",
+                temperature=0.1,
+                max_output_tokens=8192,
+            )
+            if "2.5" in model_name and "lite" not in model_name:
+                try:
+                    cfg["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=2048)
+                except Exception:
+                    pass
+            try:
+                resp = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=genai_types.GenerateContentConfig(**cfg)
+                )
+                _key_idx = idx
+                return resp
+            except Exception as e:
+                last_err = e
+                msg = str(e)
+                if _is_quota_error(e) or "404" in msg or "NOT_FOUND" in msg:
+                    print(f"O'tkazildi: kalit #{idx + 1}, model={model_name} ({type(e).__name__})")
+                    continue
+                raise
+    raise RuntimeError(f"Barcha API kalit va modellarning kunlik limiti tugadi: {last_err}")
 
 
 # ================= QAT'IY OQ RO'YXAT TEKSHIRUVI =================
@@ -354,7 +396,7 @@ def check_code_style(tree, sec: str, num: str):
             else:
                 bad.add("murakkab funksiya chaqiruvi taqiqlangan")
 
-    # §-1.1 va §-1.2: t, u, v, w kabi ortiqcha belgilashlarni butunlay taqiqlaydi (faqat s1, s2, s3, s)
+    # §-1.1 va §-1.2: t, u, v, w kabi ortiqcha belgilashlarni taqiqlaydi (faqat s1, s2, s3, s)
     if sec in {"1.1", "1.2"}:
         allowed_vars = ({"a", "b", "c", "d"} if sec == "1.1" else {"x", "y", "z"}) | {
             "s", "s1", "s2", "s3", "s4", "s5"
@@ -459,7 +501,7 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
             if not nodes:
                 raise ValueError("Koddan blok-sxema qurib bo'lmadi")
 
-            # 1) Blok-sxemaga birorta ham Python kodi (ord, chr, mod, div, .append ...) kirmaganini tekshirish
+            # 1) Blok-sxemaga birorta ham Python kodi kirmaganini tekshirish
             validate_flowchart_nodes(nodes)
 
             test_input = str(data.get("test_input", "") or "").replace("\\n", "\n")
@@ -478,7 +520,6 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
                 "nodes": nodes,
                 "problem_text": prob_text,
             }
-            # Faqat 100% kodsiz blok-sxema va ishlaydigan kodgina zaxiraga olinadi
             clean_candidate = cand
 
             # 3) Qat'iy oq ro'yxat va ortiqcha belgilashlar tekshiruvi
@@ -489,6 +530,8 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
         except Exception as e:
             last_err = e
             print(f"Generatsiya xatosi (urinish {attempt + 1}): {e}")
+            if _is_quota_error(e):
+                break
             extra = (
                 f"\nOLDINGI JAVOBDA XATO BO'LDI: {e}\n"
                 f"Xatoni 100% tuzat: ord/chr/metodlar va ortiqcha o'zgaruvchilarsiz toza matematik kod qaytar.\n"
@@ -499,6 +542,8 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
         result = clean_candidate
 
     if result is None:
+        if last_err is not None and _is_quota_error(last_err):
+            raise RuntimeError("API kunlik limiti tugadi. Render'da GEMINI_API_KEYS ga yangi kalit qo'shing.")
         raise RuntimeError(f"Toza blok-sxema yaratib bo'lmadi (qayta urining): {last_err}")
 
     FLOWCHART_CACHE[cache_key] = result
@@ -639,6 +684,7 @@ async def handle_api_flowchart(request):
 
 async def main():
     load_problems()
+    print(f"API kalitlar: {len(_GEMINI_CLIENTS)} ta | Modellar: {GEMINI_MODELS}")
 
     app = web.Application()
     app.router.add_get("/", handle_index)
