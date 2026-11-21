@@ -216,6 +216,20 @@ def clean_json_text(raw_text: str) -> str:
     return text.strip()
 
 
+_EMPTY_INPUT_RE = re.compile(
+    r'^([ \t]*)([a-zA-Z_][a-zA-Z0-9_]*(?:\[[^\]]+\])*)\s*=\s*((?:int|float)\s*\(\s*)?input\(\s*(?:""|\'\')?\s*\)',
+    re.MULTILINE
+)
+
+
+def ensure_input_prompts(code: str) -> str:
+    """Bo'sh input() larning barchasiga avtomatik o'zgaruvchi nomini yozib qo'yadi."""
+    return _EMPTY_INPUT_RE.sub(
+        lambda m: f'{m.group(1)}{m.group(2)} = {m.group(3) or ""}input("{m.group(2)} = ")',
+        code
+    )
+
+
 SYSTEM_PROMPT = r"""
 Sen universitet talabasi daftariga yozgandek ENG TOZA, SODDA va 100% KODSIZ blok-sxemaga aylanadigan matematik Python kodi yozuvchi ustozsan.
 Faqat sof JSON qaytar:
@@ -268,7 +282,7 @@ QAT'IY QOIDALAR:
        R = R + c
    print(R)
 6. KIRITISH VA CHIQARISH:
-   - Har bir kiritiladigan qiymat: `a = float(input("a = "))` yoki `n = int(input("n = "))`.
+   - Har bir kiritiladigan qiymat albatta prompt bilan: `a = float(input("a = "))` yoki `n = int(input("n = "))`.
    - Agar masalada barcha sonlar aniq berilgan bo'lsa — input() ISHLATMA.
    - Natijani oddiy chiqar: `print(s)` yoki `print("Ha")` / `print("Yo'q")`.
 7. TEZLIK VA XAVFSIZ TEST:
@@ -495,6 +509,7 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
             code = str(data.get("code_python", "")).replace("\r\n", "\n").strip("\n")
             if not code.strip():
                 raise ValueError("AI kod qaytarmadi")
+            code = ensure_input_prompts(code)
 
             tree = check_code_safety(code)
             nodes = code_to_nodes(code)
