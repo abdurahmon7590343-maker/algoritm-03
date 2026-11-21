@@ -129,11 +129,12 @@ QAT'IY QOIDALAR:
 1. Dastur TO'LIQ bo'lsin: kiritish, hisoblash va chiqarish (print). Masalaning BARCHA bandlarini (a, b, c ...) bajar.
 2. HAR BIR QATORDA FAQAT BITTA AMAL: bitta input, bitta o'zlashtirish, bitta print.
    Ruxsat: oddiy for / while / if / elif / else, o'zlashtirish (=, +=), arifmetika (+ - * / // % **), taqqoslash, and/or/not, print, input, int(), float().
-   TAQIQ: def, class, lambda, list comprehension, dict/set comprehension, .split(), list(map(...)).
+   TAQIQ: def, class, lambda, list comprehension, dict/set comprehension, .split(), list(map(...)), .append() (faqat matritsa e'lon qilishdan tashqari).
+   Ro'yxatga element qo'shishda .append() ISHLATMA — oldindan massiv e'lon qilib, indeks bilan yoz: a = [0] * 1005; a[0] = d1; a[k] = x; k = k + 1.
    Qiymatlarni almashtirish uchun qo'shimcha o'zgaruvchi ishlat: t = a, a = b, b = t (alohida qatorlarda).
    Mantiqiy belgi (flag) uchun 1 va 0 ishlat.
 3. KUTUBXONA: odatda import KERAK EMAS. Faqat zarur bo'lsa (sin, cos, sqrt, pi, acos) `from math import ...` ishlat.
-4. O'ZGARUVCHILAR: qisqa matematik nomlar: n, m, k, s, i, j, a, b, c, d, t, x, y, p, q, R, A, B.
+4. O'ZGARUVCHILAR: FAQAT 1-2 harfli qisqa matematik nomlar ishlat: n, m, k, s, i, j, a, b, c, d, d1, d2, d3, t, x, y, p, q, v, R, A, B. Inglizcha uzun so'zlar (sequence, result, count, visited, index) QAT'IY TAQIQLANADI!
 5. KIRITISH: HAR BIR qiymat ALOHIDA input() bilan va qisqa prompt bilan kiritiladi:
    `n = int(input("n = "))`, `x = float(input("x = "))`.
    MASSIV: `a = [0] * n`, so'ng `for i in range(n): a[i] = int(input("a[i] = "))`.
