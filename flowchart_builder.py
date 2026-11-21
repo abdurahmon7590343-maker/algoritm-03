@@ -104,7 +104,6 @@ def _expr(node) -> str:
         return word.join(parts)
 
     if isinstance(node, ast.Compare):
-        # a % b == 0  ->  a = b·⌊a/b⌋ (sof arifmetik shart, mod'siz)
         if (len(node.ops) == 1 and isinstance(node.left, ast.BinOp)
                 and isinstance(node.left.op, ast.Mod) and _is_num(node.comparators[0], 0)):
             l = _expr(node.left.left)
@@ -140,9 +139,7 @@ def _expr(node) -> str:
             return a0 or "0"
         if name == "int":
             return f"⌊{a0}⌋"
-        if name == "abs" or name == "fabs":
-            return f"|{a0}|"
-        if name == "len":
+        if name in ("abs", "fabs", "len"):
             return f"|{a0}|"
         if name == "sqrt":
             return f"√({a0})"
@@ -194,7 +191,6 @@ def _target_names(target) -> list:
 
 
 def _is_list_decl(value) -> bool:
-    """Massiv va matritsa e'lonlari (a = [], a = [0]*n, [[0]*m for ...]) blok bo'lmaydi."""
     if isinstance(value, (ast.List, ast.ListComp)):
         return True
     if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Mult):
@@ -217,8 +213,7 @@ def _print_text(call: ast.Call) -> str:
             shown.append(_expr(a))
     if shown:
         return ", ".join(shown)
-    lit = " ".join(x for x in literals if x).strip(" :")
-    return lit
+    return " ".join(x for x in literals if x).strip(" :")
 
 
 def _stop_inclusive(stop, step_positive=True) -> str:
@@ -275,29 +270,36 @@ def _aug_text(stmt) -> str:
     return f"{_expr(stmt.target)} = {_expr(bin_node)}"
 
 
+def _is_simple_init(txt: str) -> bool:
+    """Faqat s = 0, k = 1 kabi oddiy boshlang'ich qiymatlarni aniqlaydi."""
+    if "=" not in txt or len(txt) > 10:
+        return False
+    _, rhs = txt.split("=", 1)
+    rhs = rhs.strip()
+    return len(rhs) <= 4 and not any(ch in rhs for ch in "+-*/·()[]^√")
+
+
 def _merge_blocks(nodes: list) -> list:
-    """Ketma-ket kiritish, chiqarish va qisqa boshlang'ich o'zlashtirishlarni bitta blokka birlashtiradi."""
+    """Ketma-ket kiritish, chiqarish va oddiy boshlang'ich qiymatlarni birlashtiradi."""
     merged = []
     for n in nodes:
         if merged:
             prev = merged[-1]
-            # Ketma-ket kiritishlarni bitta parallelogrammga birlashtirish: a, b, c, d
             if prev["type"] == "input" and n["type"] == "input":
                 cand = prev["text"] + ", " + n["text"]
                 if len(cand) <= 26:
                     prev["text"] = cand
                     continue
-            # Ketma-ket chiqarishlarni birlashtirish
             if prev["type"] == "output" and n["type"] == "output":
                 cand = prev["text"] + ", " + n["text"]
                 if len(cand) <= 24:
                     prev["text"] = cand
                     continue
-            # Qisqa o'zlashtirishlarni birlashtirish: s = 0, k = 1, p = 1
             if prev["type"] == "assign" and n["type"] == "assign":
-                if len(prev["text"]) <= 14 and len(n["text"]) <= 11:
+                parts_prev = [p.strip() for p in prev["text"].split(",")]
+                if all(_is_simple_init(p) for p in parts_prev) and _is_simple_init(n["text"]):
                     cand = prev["text"] + ", " + n["text"]
-                    if len(cand) <= 24:
+                    if len(cand) <= 26:
                         prev["text"] = cand
                         continue
         merged.append(n)
