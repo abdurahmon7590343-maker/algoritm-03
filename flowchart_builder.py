@@ -1,11 +1,26 @@
-"""Python kodidan toza, ortiqcha so'z va kodlarsiz matematik blok-sxema quruvchi modul."""
+"""Python kodidan 100% kodsiz, sof matematik blok-sxema quruvchi va tekshiruvchi modul."""
 import ast
+import re
 
 PREC = {ast.Pow: 5, ast.Mult: 4, ast.Div: 4, ast.FloorDiv: 4, ast.Mod: 4, ast.Add: 3, ast.Sub: 3}
 BIN_SYMBOL = {ast.Add: " + ", ast.Sub: " - ", ast.Mult: "·", ast.Div: "/",
               ast.FloorDiv: "/", ast.Mod: "%", ast.Pow: "^"}
 CMP_SYMBOL = {ast.Eq: "=", ast.NotEq: "≠", ast.Lt: "<", ast.LtE: "≤", ast.Gt: ">", ast.GtE: "≥",
               ast.In: "∈", ast.NotIn: "∉", ast.Is: "=", ast.IsNot: "≠"}
+
+# Blok-sxemada ruxsat etilgan yagona matematik funksiyalar
+ALLOWED_FLOW_FUNCS = {"sin", "cos", "tg", "ctg", "arcsin", "arccos", "arctg", "ln", "lg", "log", "exp"}
+
+# Blok-sxemaga kirishi qat'iyan taqiqlangan Python so'z va operatorlari
+FORBIDDEN_FLOW_WORDS = re.compile(
+    r"\b(ord|chr|len|str|int|float|bool|list|dict|set|tuple|range|input|print|"
+    r"abs|fabs|sqrt|pow|round|sum|min|max|sorted|reversed|map|zip|filter|enumerate|"
+    r"append|extend|insert|pop|remove|sort|reverse|split|join|strip|replace|find|index|count|"
+    r"lower|upper|isdigit|isalpha|isalnum|isupper|islower|startswith|endswith|"
+    r"mod|div|True|False|None|def|class|lambda|return|break|continue|import|from)\b"
+)
+FORBIDDEN_FLOW_OPS = re.compile(r"(==|!=|<=|>=|//|\*\*|\+=|-=|\*=|/=|:=|%|\.[a-zA-Z_])")
+CALL_RE = re.compile(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*\(")
 
 
 def _s(node) -> str:
@@ -47,7 +62,7 @@ def _expr(node) -> str:
         if v is False or v is None:
             return "0"
         if isinstance(v, str):
-            return v
+            return f"'{v}'" if len(v) <= 2 else v
         return repr(v)
 
     if isinstance(node, ast.Name):
@@ -63,14 +78,17 @@ def _expr(node) -> str:
         op = type(node.op)
         p = PREC.get(op, 3)
         if op is ast.FloorDiv:
-            return f"⌊{_expr(node.left)}/{_expr(node.right)}⌋"
+            return f"⌊{_wrap(node.left, 4)}/{_wrap(node.right, 5)}⌋"
         if op is ast.Mod:
             l = _wrap(node.left, 4)
             r = _wrap(node.right, 5)
-            return f"{l} - {r}·⌊{_expr(node.left)}/{_expr(node.right)}⌋"
+            return f"{l} - {r}·⌊{l}/{r}⌋"
         if op is ast.Pow:
             if _is_num(node.right, 0.5):
                 return "√(" + _expr(node.left) + ")"
+            if (isinstance(node.right, ast.BinOp) and isinstance(node.right.op, ast.Div)
+                    and _is_num(node.right.left, 1) and _is_num(node.right.right, 3)):
+                return "∛(" + _expr(node.left) + ")"
             base = _wrap(node.left, p + 1)
             if isinstance(node.left, ast.UnaryOp) or (_is_num(node.left) and node.left.value < 0):
                 base = f"({_expr(node.left)})"
@@ -80,6 +98,8 @@ def _expr(node) -> str:
                 return f"{base}³"
             return f"{base}^{_wrap(node.right, p)}"
         left = _wrap(node.left, p)
+        if op is ast.Div and isinstance(node.left, ast.BinOp) and isinstance(node.left.op, ast.Div):
+            left = f"({left})"
         right = _wrap(node.right, p + 1)
         return f"{left}{BIN_SYMBOL.get(op, '?')}{right}"
 
@@ -106,8 +126,8 @@ def _expr(node) -> str:
     if isinstance(node, ast.Compare):
         if (len(node.ops) == 1 and isinstance(node.left, ast.BinOp)
                 and isinstance(node.left.op, ast.Mod) and _is_num(node.comparators[0], 0)):
-            l = _expr(node.left.left)
-            r = _expr(node.left.right)
+            l = _wrap(node.left.left, 4)
+            r = _wrap(node.left.right, 5)
             if isinstance(node.ops[0], ast.Eq):
                 return f"{l} = {r}·⌊{l}/{r}⌋"
             if isinstance(node.ops[0], ast.NotEq):
@@ -129,15 +149,25 @@ def _expr(node) -> str:
         return f"{base}[{_expr(sl)}]"
 
     if isinstance(node, ast.Attribute):
+        if isinstance(node.value, ast.Name) and node.value.id == "math":
+            return "π" if node.attr == "pi" else node.attr
         return f"{_expr(node.value)}.{node.attr}"
 
     if isinstance(node, ast.Call):
-        name = node.func.id if isinstance(node.func, ast.Name) else None
+        name = None
+        if isinstance(node.func, ast.Name):
+            name = node.func.id
+        elif (isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)
+              and node.func.value.id == "math"):
+            name = node.func.attr
+
         args = [_expr(a) for a in node.args]
         a0 = args[0] if args else ""
         if name == "float":
             return a0 or "0"
         if name == "int":
+            if node.args and isinstance(node.args[0], ast.Subscript):
+                return a0
             return f"⌊{a0}⌋"
         if name in ("abs", "fabs", "len"):
             return f"|{a0}|"
@@ -147,6 +177,22 @@ def _expr(node) -> str:
             return f"⌊{a0}⌋"
         if name == "ceil":
             return f"⌈{a0}⌉"
+        if name == "tan":
+            return f"tg({a0})"
+        if name == "asin":
+            return f"arcsin({a0})"
+        if name == "acos":
+            return f"arccos({a0})"
+        if name == "atan":
+            return f"arctg({a0})"
+        if name == "log":
+            if len(args) == 2:
+                return f"log({args[1]}, {a0})"
+            return f"ln({a0})"
+        if name == "log10":
+            return f"lg({a0})"
+        if name == "exp":
+            return f"e^({a0})"
         if name == "pow" and len(args) == 2:
             return f"{_wrap(node.args[0], 6)}^{_wrap(node.args[1], 5)}"
         if name == "input":
@@ -190,11 +236,14 @@ def _target_names(target) -> list:
     return [_expr(target)]
 
 
-def _is_list_decl(value) -> bool:
+def _is_decl_only(value) -> bool:
+    """Massiv, matritsa va alifbo/jadval e'lonlari blok bo'lmaydi."""
     if isinstance(value, (ast.List, ast.ListComp)):
         return True
     if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Mult):
         return isinstance(value.left, (ast.List, ast.ListComp)) or isinstance(value.right, (ast.List, ast.ListComp))
+    if isinstance(value, ast.Constant) and isinstance(value.value, str) and len(value.value) >= 10:
+        return True
     return False
 
 
@@ -271,7 +320,6 @@ def _aug_text(stmt) -> str:
 
 
 def _is_simple_init(txt: str) -> bool:
-    """Faqat s = 0, k = 1 kabi oddiy boshlang'ich qiymatlarni aniqlaydi."""
     if "=" not in txt or len(txt) > 10:
         return False
     _, rhs = txt.split("=", 1)
@@ -280,7 +328,6 @@ def _is_simple_init(txt: str) -> bool:
 
 
 def _merge_blocks(nodes: list) -> list:
-    """Ketma-ket kiritish, chiqarish va oddiy boshlang'ich qiymatlarni birlashtiradi."""
     merged = []
     for n in nodes:
         if merged:
@@ -313,7 +360,6 @@ def _convert(stmts, func_names) -> list:
             continue
         if isinstance(st, ast.Expr) and isinstance(st.value, ast.Constant):
             continue
-
         if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef)):
             func_names.add(st.name)
             nodes += _convert(st.body, func_names)
@@ -362,7 +408,7 @@ def _convert(stmts, func_names) -> list:
                 arg = call.args[0]
                 if _has_input(arg):
                     nodes.append({"type": "input", "text": _expr(call.func.value)})
-                elif _is_list_decl(arg):
+                elif _is_decl_only(arg):
                     continue
                 else:
                     nodes.append({"type": "assign", "text": f"{_expr(call.func.value)} ← {_expr(arg)}"})
@@ -383,7 +429,7 @@ def _convert(stmts, func_names) -> list:
                     names += _target_names(t)
                 if names:
                     nodes.append({"type": "input", "text": ", ".join(names)})
-            elif _is_list_decl(value):
+            elif _is_decl_only(value):
                 continue
             else:
                 for t in targets:
@@ -391,6 +437,35 @@ def _convert(stmts, func_names) -> list:
         else:
             nodes.append({"type": "assign", "text": _s(st)})
     return _merge_blocks(nodes)
+
+
+def validate_flowchart_nodes(nodes: list):
+    """Har bir blok matnini tekshiradi: birorta ham Python kodi kirib qolgan bo'lsa xato beradi."""
+    leaks = set()
+
+    def walk(items):
+        for n in items:
+            t = n.get("type", "")
+            if t != "output":
+                txt = n.get("text") or n.get("condition") or ""
+                cleaned = re.sub(r"'[^']*'", "", txt)
+                for m in CALL_RE.finditer(cleaned):
+                    fn = m.group(1)
+                    if fn not in ALLOWED_FLOW_FUNCS:
+                        leaks.add(f"blok-sxemaga '{fn}()' funksiyasi kirib qoldi")
+                for m in FORBIDDEN_FLOW_WORDS.finditer(cleaned):
+                    leaks.add(f"blok-sxemaga '{m.group(1)}' Python kodi kirib qoldi")
+                for m in FORBIDDEN_FLOW_OPS.finditer(cleaned):
+                    leaks.add(f"blok-sxemaga '{m.group(1)}' Python operatori kirib qoldi")
+            if t == "if":
+                walk(n.get("trueBranch") or [])
+                walk(n.get("falseBranch") or [])
+            elif t in ("for", "while", "loop"):
+                walk(n.get("body") or [])
+
+    walk(nodes)
+    if leaks:
+        raise ValueError("BLOK_SXEMA_TOZALIK: " + "; ".join(sorted(leaks)))
 
 
 def code_to_nodes(code: str) -> list:
