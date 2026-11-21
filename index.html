@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Blok-Sxema Mini App</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="[https://telegram.org/js/telegram-web-app.js](https://telegram.org/js/telegram-web-app.js)"></script>
 <style>
   :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #38bdf8; }
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
@@ -228,7 +228,7 @@ function applyScale() {
 function fitToScreen() {
   const cont = document.getElementById("canvas-container");
   const cw = (cont.clientWidth || window.innerWidth) - 32;
-  currentScale = Math.max(0.32, Math.min(1, cw / svgW));
+  currentScale = Math.max(0.3, Math.min(1, cw / svgW));
   applyScale();
 }
 
@@ -298,27 +298,29 @@ function wrapWords(text, maxChars = 24) {
   return lines.length ? lines : [""];
 }
 
-// ================= TO'G'RILANGAN GRAFIK MOTOR =================
-const NODE_W = 210;
+// ================= GRAFIK MOTOR (ASSIMETRIK O'LCHASH) =================
+const NODE_W = 200;
 const NODE_H = 54;
 const V_GAP = 32;
-const IF_H = 78;
-const IF_W = NODE_W + 30;
-const LOOP_H = 64;
+const IF_H = 84;
+const IF_W = NODE_W + 50;
+const LOOP_H = 62;
 const LOOP_W = NODE_W + 26;
 
 function measureSequence(nodes) {
-  let width = NODE_W + 20;
+  let leftW = (NODE_W + 20) / 2;
+  let rightW = (NODE_W + 20) / 2;
   let height = 0;
   const measured = [];
   for (let i = 0; i < nodes.length; i++) {
     const m = measureNode(nodes[i] || {});
     measured.push(m);
-    width = Math.max(width, m.width);
+    leftW = Math.max(leftW, m.leftW);
+    rightW = Math.max(rightW, m.rightW);
     height += m.height;
     if (i < nodes.length - 1) height += V_GAP;
   }
-  return { type: "seq", items: measured, width, height };
+  return { type: "seq", items: measured, leftW, rightW, width: leftW + rightW, height };
 }
 
 function measureNode(node) {
@@ -327,32 +329,34 @@ function measureNode(node) {
   if (t === "if") {
     const tSeq = measureSequence(node.trueBranch || []);
     const fSeq = measureSequence(node.falseBranch || []);
-    // Har bir shoxcha o'zining haqiqiy kengligi bo'yicha hisoblanadi (bo'sh Yo'q tarmog'i chizmani 2 barobar cho'zib yubormasligi uchun!)
-    const leftHalf = tSeq.items.length ? tSeq.width / 2 : 16;
-    const rightHalf = fSeq.items.length ? fSeq.width / 2 : 16;
-    const dLeft = Math.max(IF_W / 2 + 26, leftHalf + 18);
-    const dRight = Math.max(IF_W / 2 + 26, rightHalf + 18);
-    const extentLeft = dLeft + leftHalf + 14;
-    const extentRight = dRight + rightHalf + 14;
-    const width = 2 * Math.max(extentLeft, extentRight);
+    const hasT = tSeq.items.length > 0;
+    const hasF = fSeq.items.length > 0;
+
+    const leftShift = Math.max(IF_W / 2 + 24, hasT ? tSeq.rightW + 20 : 0);
+    const rightShift = Math.max(IF_W / 2 + 24, hasF ? fSeq.leftW + 20 : 0);
+
+    const leftW = Math.max(IF_W / 2 + 12, leftShift + (hasT ? tSeq.leftW : 14));
+    const rightW = Math.max(IF_W / 2 + 12, rightShift + (hasF ? fSeq.rightW : 14));
     const branchH = Math.max(tSeq.height, fSeq.height, 20);
-    const height = IF_H + V_GAP + branchH + 22;
-    return { type: "if", node, tSeq, fSeq, dLeft, dRight, width, height };
+    const height = IF_H + V_GAP + branchH + 24;
+
+    return { type: "if", node, tSeq, fSeq, leftShift, rightShift, leftW, rightW, width: leftW + rightW, height };
   }
 
   if (t === "while" || t === "for" || t === "loop") {
     const bodySeq = measureSequence(node.body || []);
-    const width = Math.max(LOOP_W + 76, bodySeq.width + 86);
-    const bodyH = bodySeq.items.length ? bodySeq.height : 0;
+    const hasBody = bodySeq.items.length > 0;
+    const leftW = Math.max(LOOP_W / 2 + 36, hasBody ? bodySeq.leftW + 38 : 0);
+    const rightW = Math.max(LOOP_W / 2 + 36, hasBody ? bodySeq.rightW + 38 : 0);
+    const bodyH = hasBody ? bodySeq.height : 0;
     const height = LOOP_H + V_GAP + bodyH + 34;
-    return { type: "loop", node, bodySeq, width, height };
+
+    return { type: "loop", node, bodySeq, leftW, rightW, width: leftW + rightW, height };
   }
 
   const known = ["terminal", "input", "output"];
-  const txt = node.text || node.condition || "";
-  const lines = wrapWords(txt, 25);
-  const boxH = lines.length >= 3 ? NODE_H + 14 : NODE_H;
-  return { type: known.includes(t) ? t : "assign", node, width: NODE_W + 20, height: boxH };
+  const half = (NODE_W + 20) / 2;
+  return { type: known.includes(t) ? t : "assign", node, leftW: half, rightW: half, width: NODE_W + 20, height: NODE_H };
 }
 
 function esc(s) {
@@ -361,8 +365,9 @@ function esc(s) {
 
 function renderFlowgorithmSVG(nodes) {
   const tree = measureSequence(nodes);
-  svgW = Math.max(tree.width + 48, 320);
-  svgH = tree.height + 64;
+  svgW = Math.max(tree.leftW + tree.rightW + 60, 300);
+  svgH = tree.height + 70;
+  const startCx = (svgW - (tree.leftW + tree.rightW)) / 2 + tree.leftW;
   const out = [];
 
   function drawArrow(x1, y1, x2, y2) {
@@ -371,7 +376,7 @@ function renderFlowgorithmSVG(nodes) {
   function drawLine(x1, y1, x2, y2) {
     out.push('<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#334155" stroke-width="2.2"/>');
   }
-  function drawText(cx, cy, text, color, maxChars = 25) {
+  function drawText(cx, cy, text, color, maxChars = 26) {
     let lines = wrapWords(text, maxChars);
     if (lines.length > 3) {
       let third = lines.slice(2).join(" ");
@@ -404,8 +409,7 @@ function renderFlowgorithmSVG(nodes) {
 
   function renderItem(m, cx, y) {
     const x = cx - NODE_W / 2;
-    const bh = m.height || NODE_H;
-    const cy = y + bh / 2;
+    const cy = y + NODE_H / 2;
 
     if (m.type === "terminal") {
       const c = COLORS.terminal;
@@ -415,7 +419,7 @@ function renderFlowgorithmSVG(nodes) {
     else if (m.type === "input" || m.type === "output") {
       const c = m.type === "input" ? COLORS.input : COLORS.output;
       const sk = 18;
-      const pts = (x + sk) + "," + y + " " + (x + NODE_W) + "," + y + " " + (x + NODE_W - sk) + "," + (y + bh) + " " + x + "," + (y + bh);
+      const pts = (x + sk) + "," + y + " " + (x + NODE_W) + "," + y + " " + (x + NODE_W - sk) + "," + (y + NODE_H) + " " + x + "," + (y + NODE_H);
       out.push('<polygon points="' + pts + '" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
       drawText(cx, cy, m.node.text || m.node.condition, c.text);
     }
@@ -426,14 +430,14 @@ function renderFlowgorithmSVG(nodes) {
       out.push('<polygon points="' + pts + '" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
       drawText(cx, dcy, m.node.condition || m.node.text, c.text, 20);
 
-      const leftCx = cx - m.dLeft;
-      const rightCx = cx + m.dRight;
+      const leftCx = cx - m.leftShift;
+      const rightCx = cx + m.rightShift;
       const branchStartY = y + IF_H + V_GAP;
       const mergeY = y + m.height;
 
       // Ha (chap)
       drawLine(cx - IF_W / 2, dcy, leftCx, dcy);
-      label(cx - IF_W / 2 - 14, dcy - 6, "Ha", "#15803d");
+      label((cx - IF_W / 2 + leftCx) / 2, dcy - 7, "Ha", "#15803d");
       if (m.tSeq.items.length > 0) {
         drawArrow(leftCx, dcy, leftCx, branchStartY);
         renderSeq(m.tSeq, leftCx, branchStartY);
@@ -444,7 +448,7 @@ function renderFlowgorithmSVG(nodes) {
 
       // Yo'q (o'ng)
       drawLine(cx + IF_W / 2, dcy, rightCx, dcy);
-      label(cx + IF_W / 2 + 16, dcy - 6, "Yo'q", "#b91c1c");
+      label((cx + IF_W / 2 + rightCx) / 2, dcy - 7, "Yo'q", "#b91c1c");
       if (m.fSeq.items.length > 0) {
         drawArrow(rightCx, dcy, rightCx, branchStartY);
         renderSeq(m.fSeq, rightCx, branchStartY);
@@ -475,32 +479,30 @@ function renderFlowgorithmSVG(nodes) {
         renderSeq(m.bodySeq, cx, bodyStartY);
       }
 
-      // Qaytish chizig'i (chapdan)
-      const leftLoopX = cx - m.width / 2 + 14;
+      const leftLoopX = cx - m.leftW + 14;
       const backY = bodyEndY + 16;
       drawLine(cx, bodyEndY, cx, backY);
       drawLine(cx, backY, leftLoopX, backY);
       drawLine(leftLoopX, backY, leftLoopX, lcy);
       drawArrow(leftLoopX, lcy, cx - hw, lcy);
 
-      // Chiqish (o'ngdan)
-      const rightExitX = cx + m.width / 2 - 14;
+      const rightExitX = cx + m.rightW - 14;
       drawLine(cx + hw, lcy, rightExitX, lcy);
-      label(cx + hw + 18, lcy - 6, "Yo'q", "#b91c1c");
+      label(cx + hw + 20, lcy - 6, "Yo'q", "#b91c1c");
       drawLine(rightExitX, lcy, rightExitX, bottomY);
       drawLine(rightExitX, bottomY, cx, bottomY);
       out.push('<circle cx="' + cx + '" cy="' + bottomY + '" r="4" fill="#334155"/>');
     }
     else {
       const c = COLORS.assign;
-      out.push('<rect x="' + x + '" y="' + y + '" width="' + NODE_W + '" height="' + bh + '" rx="6" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
+      out.push('<rect x="' + x + '" y="' + y + '" width="' + NODE_W + '" height="' + NODE_H + '" rx="6" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
       drawText(cx, cy, m.node.text || m.node.condition, c.text);
     }
   }
 
-  renderSeq(tree, svgW / 2, 24);
+  renderSeq(tree, startCx, 24);
 
-  return '<svg id="flow-svg" xmlns="http://www.w3.org/2000/svg" width="' + svgW + '" height="' + svgH + '" viewBox="0 0 ' + svgW + ' ' + svgH + '">' +
+  return '<svg id="flow-svg" xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="' + svgW + '" height="' + svgH + '" viewBox="0 0 ' + svgW + ' ' + svgH + '">' +
     '<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">' +
     '<path d="M 0 1 L 10 5 L 0 9 z" fill="#334155"/></marker></defs>' +
     '<rect width="100%" height="100%" fill="#f8fafc"/>' +
