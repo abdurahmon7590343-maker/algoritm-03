@@ -41,14 +41,27 @@ PROBLEMS_DB = {}
 HINTS = {}
 FLOWCHART_CACHE = {}
 
+PDF_BOB1_PATH = os.getenv("PDF_BOB1_PATH", "BLACKCURSE1.pdf")
+
 SECTION_NAMES = {
+    "1.1": "§-1.1. Arifmetik ifodalar",
+    "1.2": "§-1.2. Elementar funksiyalar",
+    "1.3": "§-1.3. Geometrik va sodda masalalar",
+    "1.4.1": "§-1.4 (1). Tarmoqlanish",
+    "1.4.2": "§-1.4 (2). Tanlash operatori",
+    "1.5.1": "§-1.5 (1). Takrorlash (for)",
+    "1.5.2": "§-1.5 (2). Ichma-ich sikllar",
+    "1.5.3": "§-1.5 (3). Takrorlash (while)",
+    "1.6": "§-1.6. Bir o'lchovli massivlar",
+    "1.7": "§-1.7. Ikki o'lchovli massivlar",
+    "1.8": "§-1.8. Belgili kattaliklar",
     "5.1": "§-5.1. Butun sonli masalalar",
     "5.2": "§-5.2. Sanoq sistemalari",
     "5.3": "§-5.3. Geometriya",
     "5.4": "§-5.4. Massivlarni tartiblash",
     "5.5": "§-5.5. Ko'phadlar bilan ishlash",
     "5.6": "§-5.6. Matrisalarni tuzish",
-    "5.7": "§-5.7. Matrisalar algebrasi"
+    "5.7": "§-5.7. Matrisalar algebrasi",
 }
 
 # ================= PDF PARSER =================
@@ -93,7 +106,74 @@ def load_problems_from_pdf(pdf_path: str):
 # ================= MASALALARNI YUKLASH =================
 PROBLEMS_JSON = os.getenv("PROBLEMS_JSON", "problems.json")
 
+def _parse_numbered_block(sec_body: str, prefix: str = "") -> dict:
+    """Matndan 1., 2., ... ko'rinishidagi masalalarni ajratib oladi."""
+    probs = {}
+    matches = list(re.finditer(r'(?:^|\n)\s*(\d{1,2})\s*[\.,]\s+', sec_body))
+    valid = []
+    for m in matches:
+        num = int(m.group(1))
+        if 1 <= num <= 25 and str(num) not in probs:
+            valid.append((num, m.start(), m.end()))
+            probs[str(num)] = ""
+    for i, (num, _, end_pos) in enumerate(valid):
+        nxt = valid[i + 1][1] if i + 1 < len(valid) else len(sec_body)
+        txt = re.sub(r'\s+', ' ', sec_body[end_pos:nxt]).strip()
+        probs[str(num)] = (f"{prefix} {txt}".strip() if prefix else txt)
+    return probs
+
+
+def load_bob1_from_pdf(pdf_path: str):
+    """BLACKCURSE1.pdf (I BOB: §-1.1 .. §-1.8) masalalarini yuklaydi."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    path = pdf_path if os.path.isabs(pdf_path) else os.path.join(base, pdf_path)
+    if not os.path.exists(path):
+        print(f"DIQQAT: {path} topilmadi (I bob yuklanmadi).")
+        return
+
+    doc = fitz.open(path)
+    full_text = ""
+    for page in doc:
+        t = page.get_text("text")
+        t = re.sub(r'\n\s*\d{1,2}\s*\n', '\n', t)  # sahifa raqamlarini olib tashlash
+        full_text += t + "\n"
+
+    sec_matches = list(re.finditer(r'§\s*-\s*(1\.[1-8])\.\s*([^\n]+)', full_text))
+    for idx, match in enumerate(sec_matches):
+        sec_code = match.group(1)
+        start_pos = match.end()
+        end_pos = sec_matches[idx + 1].start() if idx + 1 < len(sec_matches) else len(full_text)
+        body = full_text[start_pos:end_pos]
+
+        if sec_code == "1.4":
+            parts = re.split(r'2\s*-\s*vazifa', body, maxsplit=1, flags=re.IGNORECASE)
+            PROBLEMS_DB["1.4.1"] = _parse_numbered_block(parts[0])
+            if len(parts) > 1:
+                PROBLEMS_DB["1.4.2"] = _parse_numbered_block(parts[1])
+        elif sec_code == "1.5":
+            p1 = re.split(r'2\s*-\s*topshiriq', body, maxsplit=1, flags=re.IGNORECASE)
+            PROBLEMS_DB["1.5.1"] = _parse_numbered_block(p1[0])
+            if len(p1) > 1:
+                p2 = re.split(r'3\s*-\s*topshiriq', p1[1], maxsplit=1, flags=re.IGNORECASE)
+                PROBLEMS_DB["1.5.2"] = _parse_numbered_block(p2[0], "n, k natural va x haqiqiy sonlari uchun hisoblang:")
+                if len(p2) > 1:
+                    PROBLEMS_DB["1.5.3"] = _parse_numbered_block(p2[1])
+        else:
+            prefix = ""
+            if sec_code == "1.1":
+                prefix = "Haqiqiy a, b, c, d sonlari uchun hisoblang (darajaga ko'tarish amalidan foydalanmasdan):"
+            elif sec_code == "1.2":
+                prefix = "Haqiqiy x, y, z sonlari uchun elementar funksiyalar yordamida hisoblang:"
+            PROBLEMS_DB[sec_code] = _parse_numbered_block(body, prefix)
+
+    print("BLACKCURSE1.pdf (I bob) muvaffaqiyatli yuklandi!")
+
+
 def load_problems():
+    # 1) I bob (BLACKCURSE1.pdf)
+    load_bob1_from_pdf(PDF_BOB1_PATH)
+
+    # 2) V bob (problems.json yoki BLACKCURSE.pdf)
     base = os.path.dirname(os.path.abspath(__file__))
     path = PROBLEMS_JSON if os.path.isabs(PROBLEMS_JSON) else os.path.join(base, PROBLEMS_JSON)
     if os.path.exists(path):
@@ -103,7 +183,7 @@ def load_problems():
             HINTS.update(data.pop("_hints", {}) or {})
             for sec, probs in data.items():
                 PROBLEMS_DB[sec] = {str(k): v for k, v in probs.items()}
-            print(f"problems.json o'qildi: {sum(len(v) for v in PROBLEMS_DB.values())} ta masala, {len(HINTS)} ta ko'rsatma")
+            print(f"Jami yuklangan masalalar: {sum(len(v) for v in PROBLEMS_DB.values())} ta")
             return
         except Exception as e:
             print(f"problems.json o'qishda xato: {e}. PDF ishlatiladi.")
