@@ -26,6 +26,8 @@ WEBAPP_URL = (
 ).rstrip("/")
 
 PDF_PATH = os.getenv("PDF_PATH", "BLACKCURSE.pdf")
+PDF_BOB1_PATH = os.getenv("PDF_BOB1_PATH", "BLACKCURSE1.pdf")
+PROBLEMS_JSON = os.getenv("PROBLEMS_JSON", "problems.json")
 PORT = int(os.getenv("PORT", 8080))
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
@@ -40,8 +42,6 @@ gemini_client = genai.Client(
 PROBLEMS_DB = {}
 HINTS = {}
 FLOWCHART_CACHE = {}
-
-PDF_BOB1_PATH = os.getenv("PDF_BOB1_PATH", "BLACKCURSE1.pdf")
 
 SECTION_NAMES = {
     "1.1": "§-1.1. Arifmetik ifodalar",
@@ -64,7 +64,68 @@ SECTION_NAMES = {
     "5.7": "§-5.7. Matrisalar algebrasi",
 }
 
-# ================= PDF PARSER =================
+# ================= PDF VA JSON PARSERLAR =================
+def _parse_numbered_block(sec_body: str, prefix: str = "") -> dict:
+    probs = {}
+    matches = list(re.finditer(r'(?:^|\n)\s*(\d{1,2})\s*[\.,]\s+', sec_body))
+    valid = []
+    for m in matches:
+        num = int(m.group(1))
+        if 1 <= num <= 25 and str(num) not in probs:
+            valid.append((num, m.start(), m.end()))
+            probs[str(num)] = ""
+    for i, (num, _, end_pos) in enumerate(valid):
+        nxt = valid[i + 1][1] if i + 1 < len(valid) else len(sec_body)
+        txt = re.sub(r'\s+', ' ', sec_body[end_pos:nxt]).strip()
+        probs[str(num)] = (f"{prefix} {txt}".strip() if prefix else txt)
+    return probs
+
+
+def load_bob1_from_pdf(pdf_path: str):
+    base = os.path.dirname(os.path.abspath(__file__))
+    path = pdf_path if os.path.isabs(pdf_path) else os.path.join(base, pdf_path)
+    if not os.path.exists(path):
+        print(f"DIQQAT: {path} topilmadi (I bob yuklanmadi).")
+        return
+
+    doc = fitz.open(path)
+    full_text = ""
+    for page in doc:
+        t = page.get_text("text")
+        t = re.sub(r'\n\s*\d{1,2}\s*\n', '\n', t)
+        full_text += t + "\n"
+
+    sec_matches = list(re.finditer(r'§\s*-\s*(1\.[1-8])\.\s*([^\n]+)', full_text))
+    for idx, match in enumerate(sec_matches):
+        sec_code = match.group(1)
+        start_pos = match.end()
+        end_pos = sec_matches[idx + 1].start() if idx + 1 < len(sec_matches) else len(full_text)
+        body = full_text[start_pos:end_pos]
+
+        if sec_code == "1.4":
+            parts = re.split(r'2\s*-\s*vazifa', body, maxsplit=1, flags=re.IGNORECASE)
+            PROBLEMS_DB["1.4.1"] = _parse_numbered_block(parts[0])
+            if len(parts) > 1:
+                PROBLEMS_DB["1.4.2"] = _parse_numbered_block(parts[1])
+        elif sec_code == "1.5":
+            p1 = re.split(r'2\s*-\s*topshiriq', body, maxsplit=1, flags=re.IGNORECASE)
+            PROBLEMS_DB["1.5.1"] = _parse_numbered_block(p1[0])
+            if len(p1) > 1:
+                p2 = re.split(r'3\s*-\s*topshiriq', p1[1], maxsplit=1, flags=re.IGNORECASE)
+                PROBLEMS_DB["1.5.2"] = _parse_numbered_block(p2[0], "n, k natural va x haqiqiy sonlari uchun hisoblang:")
+                if len(p2) > 1:
+                    PROBLEMS_DB["1.5.3"] = _parse_numbered_block(p2[1])
+        else:
+            prefix = ""
+            if sec_code == "1.1":
+                prefix = "Haqiqiy a, b, c, d sonlari uchun hisoblang (darajaga ko'tarish amalidan foydalanmasdan):"
+            elif sec_code == "1.2":
+                prefix = "Haqiqiy x, y, z sonlari uchun elementar funksiyalar yordamida hisoblang:"
+            PROBLEMS_DB[sec_code] = _parse_numbered_block(body, prefix)
+
+    print("BLACKCURSE1.pdf (I bob) yuklandi!")
+
+
 def load_problems_from_pdf(pdf_path: str):
     if not os.path.exists(pdf_path):
         print(f"DIQQAT: {pdf_path} topilmadi!")
@@ -97,83 +158,13 @@ def load_problems_from_pdf(pdf_path: str):
 
         for p_idx, (p_num, p_start, p_end) in enumerate(valid_matches):
             next_start = valid_matches[p_idx + 1][1] if p_idx + 1 < len(valid_matches) else len(sec_body)
-            prob_text = sec_body[p_end:next_start].strip()
-            prob_text = re.sub(r'\s+', ' ', prob_text)
+            prob_text = re.sub(r'\s+', ' ', sec_body[p_end:next_start]).strip()
             PROBLEMS_DB[sec_code][str(p_num)] = prob_text
-
-    print(f"PDF muvaffaqiyatli o'qildi! Bo'limlar soni: {len(PROBLEMS_DB)}")
-
-# ================= MASALALARNI YUKLASH =================
-PROBLEMS_JSON = os.getenv("PROBLEMS_JSON", "problems.json")
-
-def _parse_numbered_block(sec_body: str, prefix: str = "") -> dict:
-    """Matndan 1., 2., ... ko'rinishidagi masalalarni ajratib oladi."""
-    probs = {}
-    matches = list(re.finditer(r'(?:^|\n)\s*(\d{1,2})\s*[\.,]\s+', sec_body))
-    valid = []
-    for m in matches:
-        num = int(m.group(1))
-        if 1 <= num <= 25 and str(num) not in probs:
-            valid.append((num, m.start(), m.end()))
-            probs[str(num)] = ""
-    for i, (num, _, end_pos) in enumerate(valid):
-        nxt = valid[i + 1][1] if i + 1 < len(valid) else len(sec_body)
-        txt = re.sub(r'\s+', ' ', sec_body[end_pos:nxt]).strip()
-        probs[str(num)] = (f"{prefix} {txt}".strip() if prefix else txt)
-    return probs
-
-
-def load_bob1_from_pdf(pdf_path: str):
-    """BLACKCURSE1.pdf (I BOB: §-1.1 .. §-1.8) masalalarini yuklaydi."""
-    base = os.path.dirname(os.path.abspath(__file__))
-    path = pdf_path if os.path.isabs(pdf_path) else os.path.join(base, pdf_path)
-    if not os.path.exists(path):
-        print(f"DIQQAT: {path} topilmadi (I bob yuklanmadi).")
-        return
-
-    doc = fitz.open(path)
-    full_text = ""
-    for page in doc:
-        t = page.get_text("text")
-        t = re.sub(r'\n\s*\d{1,2}\s*\n', '\n', t)  # sahifa raqamlarini olib tashlash
-        full_text += t + "\n"
-
-    sec_matches = list(re.finditer(r'§\s*-\s*(1\.[1-8])\.\s*([^\n]+)', full_text))
-    for idx, match in enumerate(sec_matches):
-        sec_code = match.group(1)
-        start_pos = match.end()
-        end_pos = sec_matches[idx + 1].start() if idx + 1 < len(sec_matches) else len(full_text)
-        body = full_text[start_pos:end_pos]
-
-        if sec_code == "1.4":
-            parts = re.split(r'2\s*-\s*vazifa', body, maxsplit=1, flags=re.IGNORECASE)
-            PROBLEMS_DB["1.4.1"] = _parse_numbered_block(parts[0])
-            if len(parts) > 1:
-                PROBLEMS_DB["1.4.2"] = _parse_numbered_block(parts[1])
-        elif sec_code == "1.5":
-            p1 = re.split(r'2\s*-\s*topshiriq', body, maxsplit=1, flags=re.IGNORECASE)
-            PROBLEMS_DB["1.5.1"] = _parse_numbered_block(p1[0])
-            if len(p1) > 1:
-                p2 = re.split(r'3\s*-\s*topshiriq', p1[1], maxsplit=1, flags=re.IGNORECASE)
-                PROBLEMS_DB["1.5.2"] = _parse_numbered_block(p2[0], "n, k natural va x haqiqiy sonlari uchun hisoblang:")
-                if len(p2) > 1:
-                    PROBLEMS_DB["1.5.3"] = _parse_numbered_block(p2[1])
-        else:
-            prefix = ""
-            if sec_code == "1.1":
-                prefix = "Haqiqiy a, b, c, d sonlari uchun hisoblang (darajaga ko'tarish amalidan foydalanmasdan):"
-            elif sec_code == "1.2":
-                prefix = "Haqiqiy x, y, z sonlari uchun elementar funksiyalar yordamida hisoblang:"
-            PROBLEMS_DB[sec_code] = _parse_numbered_block(body, prefix)
-
-    print("BLACKCURSE1.pdf (I bob) muvaffaqiyatli yuklandi!")
 
 
 def load_problems():
-    # 1) I bob (BLACKCURSE1.pdf)
     load_bob1_from_pdf(PDF_BOB1_PATH)
 
-    # 2) V bob (problems.json yoki BLACKCURSE.pdf)
     base = os.path.dirname(os.path.abspath(__file__))
     path = PROBLEMS_JSON if os.path.isabs(PROBLEMS_JSON) else os.path.join(base, PROBLEMS_JSON)
     if os.path.exists(path):
@@ -183,11 +174,12 @@ def load_problems():
             HINTS.update(data.pop("_hints", {}) or {})
             for sec, probs in data.items():
                 PROBLEMS_DB[sec] = {str(k): v for k, v in probs.items()}
-            print(f"Jami yuklangan masalalar: {sum(len(v) for v in PROBLEMS_DB.values())} ta")
+            print(f"Jami masalalar: {sum(len(v) for v in PROBLEMS_DB.values())} ta")
             return
         except Exception as e:
             print(f"problems.json o'qishda xato: {e}. PDF ishlatiladi.")
     load_problems_from_pdf(PDF_PATH)
+
 
 # ================= AI GENERATOR =================
 def clean_json_text(raw_text: str) -> str:
@@ -197,40 +189,49 @@ def clean_json_text(raw_text: str) -> str:
         text = re.sub(r"\s*```$", "", text)
     return text.strip()
 
+
 SYSTEM_PROMPT = r"""
-Sen universitet talabalari uchun Flowgorithm blok-sxemasiga aynan mos keladigan, eng sodda va odam yozgandek toza Python dasturlarini yozuvchi ustozsan.
-Berilgan masalani TO'G'RI va TEZ ishlaydigan qilib yechadigan dastur yoz va faqat sof JSON qaytar:
+Sen matematika va informatika o'qituvchisisanki, talaba daftariga yozgandek ENG TOZA, SODDA va QISQA matematik Python kodi yozasan.
+Shu koddan avtomatik ravishda blok-sxema chiziladi. Faqat sof JSON qaytar:
 {"explanation": "...", "input_format": "...", "test_input": "...", "code_python": "..."}
 
-MASALA MATNIDAGI BELGILAR: ^ — daraja (2^200 = 2 ning 200-darajasi), _ yoki pastki indeks — indeks (a_i, d₀),
-n! — faktorial, ≤ ≥ — taqqoslash. Masala shartini ehtiyotkorlik bilan o'qi va to'liq yech.
-
 QAT'IY QOIDALAR:
-1. Dastur TO'LIQ bo'lsin: kiritish, hisoblash va chiqarish (print). Masalaning BARCHA bandlarini (a, b, c ...) bajar.
-2. HAR BIR QATORDA FAQAT BITTA AMAL: bitta input, bitta o'zlashtirish, bitta print.
-   Ruxsat: oddiy for / while / if / elif / else, o'zlashtirish (=, +=), arifmetika (+ - * / // % **), taqqoslash, and/or/not, print, input, int(), float().
-   TAQIQ: def, class, lambda, list comprehension, dict/set comprehension, .split(), list(map(...)), .append() (faqat matritsa e'lon qilishdan tashqari).
-   Ro'yxatga element qo'shishda .append() ISHLATMA — oldindan massiv e'lon qilib, indeks bilan yoz: a = [0] * 1005; a[0] = d1; a[k] = x; k = k + 1.
-   Qiymatlarni almashtirish uchun qo'shimcha o'zgaruvchi ishlat: t = a, a = b, b = t (alohida qatorlarda).
-   Mantiqiy belgi (flag) uchun 1 va 0 ishlat.
-3. KUTUBXONA: odatda import KERAK EMAS. Faqat zarur bo'lsa (sin, cos, sqrt, pi, acos) `from math import ...` ishlat.
-4. O'ZGARUVCHILAR: FAQAT 1-2 harfli qisqa matematik nomlar ishlat: n, m, k, s, i, j, a, b, c, d, d1, d2, d3, t, x, y, p, q, v, R, A, B. Inglizcha uzun so'zlar (sequence, result, count, visited, index) QAT'IY TAQIQLANADI!
-5. KIRITISH: HAR BIR qiymat ALOHIDA input() bilan va qisqa prompt bilan kiritiladi:
-   `n = int(input("n = "))`, `x = float(input("x = "))`.
-   MASSIV: `a = [0] * n`, so'ng `for i in range(n): a[i] = int(input("a[i] = "))`.
-   MATRITSA: `a = []`, `for i in range(n): a.append([0] * m)`, so'ng ichma-ich for bilan `a[i][j] = float(input("a[i][j] = "))`.
-   Agar masalada kiritiladigan qiymat YO'Q bo'lsa (oraliq aniq berilgan: [200,300], uch xonali sonlar) — input ISHLATMA.
-   «Fayl» (f, g, h fayllar) so'zi bo'lsa — fayl o'rniga oddiy massiv ishlat.
-6. RAQAMLAR bilan ishlash: iloji boricha `x % 10` va `x // 10` bilan, sikl ichida yoz.
-7. Massivlarni tartiblash, yig'indi, maksimum kabilarni tayyor funksiyalarsiz o'zing sikl bilan yoz.
-8. TEZLIK: hech qachon cheksiz yoki sekin sikl yozma. Chegaralar katta bo'lsa (10^15, 2·10^9) davr topish, binar qidiruv, tez daraja yoki dinamik dasturlash ishlat.
-9. Izohlar (#) kerak emas. print da natijani tushunarli chiqar: `print("Natija:", s)`. "Mumkinmi? / bormi?" masalalarida `print("Ha")` yoki `print("Yo'q")`.
-10. Agar «YO'L-YO'RIQ» berilgan bo'lsa — aynan shu usulga amal qil.
-11. JSON maydonlari:
-    "explanation": 1-3 gapli sodda o'zbekcha tushuntirish;
-    "input_format": nimalarni qaysi tartibda kiritish kerakligi (kiritish bo'lmasa «Kiritish kerak emas»);
-    "test_input": dasturni sinash uchun KICHIK va TEZ ishlaydigan namuna kiritish (masalan, n=5, massiv o'lchami 3-4). HAR BIR input() uchun alohida qiymat, \n bilan ajratilgan. Kiritish bo'lmasa "".
+1. O'ZGARUVCHILAR (ENG MUHIM):
+   - FAQAT 1-2 harfli matematik nomlar ishlat: a, b, c, d, d1, d2, d3, n, m, k, s, p, q, i, j, x, y, z, r, t, u, v, w, N, M, K, R, A, B.
+   - 3 va undan ko'p harfli inglizcha nomlar (sequence, result, count, visited, found, temp, flag, total, ans, num, mid, pos, arr, cur) QAT'IY TAQIQLANADI!
+2. ORTIQCHA BELGILASH VA FUNKSIYALARSIZ:
+   - Keraksiz oraliq o'zgaruvchilar (t1, t2, temp, flag) yaratma; formulani to'g'ridan-to'g'ri bitta qatorda yoz.
+   - TAQIQLANADI: def, class, lambda, break, continue, True, False, while True, .append(), .pop(), .sort(), .reverse(), .split(), .join(), sum(), min(), max(), sorted(), map(), zip(), enumerate(), round(), pow(), list(), dict(), set(), tuple().
+   - Agar 1.8 (matnli masalalar) yoki 5.1.31 bo'lmasa: len() va str() ham TAQIQLANADI!
+   - Massiv kerak bo'lsa `a = [0] * n` deb e'lon qil (indeks bilan yoz, .append() ISHLATMA).
+   - Matritsa kerak bo'lsa bitta qatorda `A = [[0] * m for i in range(n)]` deb e'lon qil.
+   - Kutubxona faqat juda zarur bo'lsa (sin, cos, tan, log, exp, sqrt, pi) `from math import ...` ishlat.
+3. KIRITISH VA CHIQARISH:
+   - Har bir kiritiladigan qiymat: `n = int(input("n = "))` yoki `x = float(input("x = "))`.
+   - Agar masalada barcha sonlar aniq berilgan bo'lsa (masalan [200, 300] oraliq) — input() ISHLATMA.
+   - Natijani ortiqcha so'zlarsiz chiqar: `print(s)` yoki `print("Ha")` / `print("Yo'q")`.
+4. YOMON VA YAXSHI NAMUNA:
+   YOMON:
+     sequence = []
+     sequence.append(d1)
+     sequence.append(d2)
+     result = sum(sequence)
+     print("Natija:", result)
+   YAXSHI:
+     a = [0] * 1005
+     a[1] = d1
+     a[2] = d2
+     s = d1 + d2
+     print(s)
+5. TEZLIK: Cheksiz yoki sekin sikl yozma. `test_input` ga kichik va tez ishlaydigan namuna qiymatlar ber (masalan n=5, massiv o'lchami 3-4).
+6. Izohlar (#) YOZMA.
+7. JSON maydonlari:
+   - "explanation": 1-2 gapli qisqa o'zbekcha tushuntirish.
+   - "input_format": nimalarni qaysi tartibda kiritish kerakligi (bo'lmasa "Kiritish kerak emas").
+   - "test_input": har bir input() uchun alohida qiymat (\n bilan), bo'lmasa "".
+   - "code_python": toza, qisqa, odam yozgandek matematik Python kodi.
 """
+
 
 def _call_gemini(prompt: str):
     cfg = dict(
@@ -248,10 +249,13 @@ def _call_gemini(prompt: str):
         config=genai_types.GenerateContentConfig(**cfg)
     )
 
+
 # ================= KODNI TEKSHIRISH =================
 ALLOWED_IMPORTS = {"math"}
 BANNED_NAMES = {"open", "exec", "eval", "compile", "__import__", "globals", "locals",
                 "getattr", "setattr", "delattr", "vars", "breakpoint", "exit", "quit"}
+VAR_RE = re.compile(r"^[a-zA-Z]([0-9]{1,2}|[a-zA-Z0-9])?$")
+
 
 def check_code_safety(code: str):
     tree = ast.parse(code)
@@ -269,26 +273,57 @@ def check_code_safety(code: str):
             raise ValueError("maxsus (__) atributlar taqiqlangan")
     return tree
 
-def check_code_style(tree):
-    """Faqat blok-sxema tuzilishini buzadigan konstruksiyalarni tekshiradi."""
+
+def _is_zero_matrix_comp(node: ast.ListComp) -> bool:
+    """Faqat [[0] * m for i in range(n)] ko'rinishidagi matritsa e'loniga ruxsat."""
+    if len(node.generators) != 1 or node.generators[0].ifs:
+        return False
+    elt = node.elt
+    if isinstance(elt, ast.BinOp) and isinstance(elt.op, ast.Mult):
+        return isinstance(elt.left, ast.List) or isinstance(elt.right, ast.List)
+    return isinstance(elt, ast.List)
+
+
+def check_code_style(tree, sec: str, num: str):
+    """Faqat 1-2 harfli matematik nomlar va keraksiz funksiyalarsiz kodni qat'iy tekshiradi."""
     bad = set()
+    allow_str = (sec == "1.8" or f"{sec}.{num}" == "5.1.31")
+    banned_funcs = {"list", "dict", "set", "tuple", "map", "filter", "zip",
+                    "enumerate", "sum", "min", "max", "sorted", "reversed",
+                    "round", "pow", "divmod", "all", "any"}
+    if not allow_str:
+        banned_funcs |= {"str", "len"}
+    banned_methods = {"append", "extend", "insert", "pop", "remove", "sort",
+                      "reverse", "split", "join", "replace"}
+
     for n in ast.walk(tree):
         if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Lambda, ast.GeneratorExp, ast.DictComp, ast.SetComp)):
             bad.add("def/class/lambda taqiqlangan")
-        elif isinstance(n, ast.ListComp):
-            bad.add("list comprehension taqiqlangan")
+        elif isinstance(n, ast.ListComp) and not _is_zero_matrix_comp(n):
+            bad.add("list comprehension taqiqlangan (faqat matritsa e'loni [[0]*m for i in range(n)] ruxsat)")
+        elif isinstance(n, (ast.Break, ast.Continue)):
+            bad.add("break/continue o'rniga toza sikl sharti yoz")
+        elif isinstance(n, ast.Constant) and isinstance(n.value, bool):
+            bad.add("True/False o'rniga 1/0 ishlat")
+        elif isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+            if not VAR_RE.match(n.id):
+                bad.add(f"uzun o'zgaruvchi '{n.id}' taqiqlangan (faqat 1-2 harfli matematik nom ishlat)")
         elif isinstance(n, ast.Call):
             f = n.func
-            if isinstance(f, ast.Attribute) and f.attr in {"split"}:
-                bad.add(".split() taqiqlangan, qiymatlarni alohida input() bilan kirit")
+            if isinstance(f, ast.Name) and f.id in banned_funcs:
+                bad.add(f"keraksiz funksiya {f.id}() taqiqlangan")
+            if isinstance(f, ast.Attribute) and f.attr in banned_methods:
+                bad.add(f".{f.attr}() taqiqlangan, oddiy massiv indeksi a[i] ishlat")
     if bad:
         raise ValueError("USLUB: " + "; ".join(sorted(bad)))
+
 
 def code_has_input(tree) -> bool:
     for n in ast.walk(tree):
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "input":
             return True
     return False
+
 
 def _run_sync(code: str, test_input: str):
     def limits():
@@ -303,6 +338,7 @@ def _run_sync(code: str, test_input: str):
         input=test_input, capture_output=True, text=True, timeout=10,
         preexec_fn=limits if os.name == "posix" else None,
     )
+
 
 async def verify_run(code: str, test_input: str, has_input: bool):
     if has_input and not test_input.strip():
@@ -322,6 +358,7 @@ async def verify_run(code: str, test_input: str, has_input: bool):
     if not r.stdout.strip():
         raise ValueError("Dastur hech narsa chiqarmadi (print yo'q)")
 
+
 async def generate_flowchart_ast(sec: str, num: str) -> dict:
     cache_key = f"{sec}_{num}"
     if cache_key in FLOWCHART_CACHE:
@@ -335,7 +372,10 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
         f"Masala #{num}: {prob_text}\n"
     )
     if hint:
-        base_prompt += f"\nYO'L-YO'RIQ (aynan shu usulga amal qil): {hint}\n"
+        base_prompt += (
+            f"\nYO'L-YO'RIQ (g'oyani ol, lekin .append() va uzun nomlar ishlatma, "
+            f"faqat 1-2 harfli nomlar va a[k] indeks bilan yoz): {hint}\n"
+        )
 
     last_err = None
     extra = ""
@@ -343,7 +383,7 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
     candidate = None
     warning = ""
 
-    for attempt in range(3):
+    for attempt in range(4):
         try:
             response = await asyncio.wait_for(
                 asyncio.to_thread(_call_gemini, base_prompt + extra), timeout=75
@@ -376,11 +416,10 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
                 "nodes": nodes,
                 "problem_text": prob_text,
             }
-            candidate = cand
 
-            # Avval kodning ishlashini tekshiramiz, keyin uslubni
             await verify_run(code, test_input, code_has_input(tree))
-            check_code_style(tree)
+            candidate = cand
+            check_code_style(tree, sec, num)
 
             result = cand
             break
@@ -391,14 +430,14 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
                 warning = str(e)
             extra = (
                 f"\nOLDINGI JAVOBDA XATO BO'LDI: {e}\n"
-                f"Xatoni tuzatib, to'g'ri JSON va ishlaydigan kodni qaytar.\n"
+                f"Xatoni aniq tuzat: faqat 1-2 harfli matematik nomlar va oddiy arifmetika/sikllar ishlat.\n"
             )
             await asyncio.sleep(1.0)
 
-    if result is None and candidate is not None and warning:
-        if not warning.startswith("USLUB"):
+    if result is None and candidate is not None:
+        if warning and not warning.startswith("USLUB"):
             candidate["explanation"] = (candidate.get("explanation", "") +
-                                        f"\n\n⚠️ Avtomatik tekshiruv ogohlantirishi: {warning}").strip()
+                                        f"\n\n⚠️ Avtomatik tekshiruv: {warning}").strip()
         result = candidate
 
     if result is None:
@@ -407,9 +446,11 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
     FLOWCHART_CACHE[cache_key] = result
     return result
 
+
 # ================= MINI APP HTML =================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(BASE_DIR, "index.html")
+
 
 def load_index_html() -> str:
     try:
@@ -418,7 +459,9 @@ def load_index_html() -> str:
     except FileNotFoundError:
         return "<h3>index.html topilmadi. Uni bot.py bilan bir papkaga qo'ying.</h3>"
 
+
 INDEX_HTML = load_index_html()
+
 
 # ================= TELEGRAM BOT HANDLERLARI =================
 def get_sections_keyboard():
@@ -432,6 +475,7 @@ def get_sections_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
+
 def get_problems_keyboard(sec: str):
     builder = InlineKeyboardBuilder()
     probs = PROBLEMS_DB.get(sec, {})
@@ -443,25 +487,29 @@ def get_problems_keyboard(sec: str):
     builder.row(types.InlineKeyboardButton(text="⬅️ Bo'limlarga qaytish", callback_data="back:sections"))
     return builder.as_markup()
 
+
 async def safe_edit(callback: types.CallbackQuery, text: str, markup):
     try:
         await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
     except Exception as e:
         print(f"edit_text xatosi: {e}")
 
+
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
         "📐 <b>Blok-Sxema va Python Kod Generator Boti</b>\n\n"
-        "Kitobdagi (V BOB) barcha masalalarning toza o'zbekcha blok-sxemasini va sodda Python kodini ko'rish uchun bo'limni tanlang:",
+        "Kitobdagi (I va V BOB) barcha masalalarning toza blok-sxemasini va sodda matematik Python kodini ko'rish uchun bo'limni tanlang:",
         reply_markup=get_sections_keyboard(),
         parse_mode="HTML"
     )
+
 
 @dp.callback_query(F.data == "back:sections")
 async def cb_back_sections(callback: types.CallbackQuery):
     await callback.answer()
     await safe_edit(callback, "📐 <b>Kerakli bo'limni tanlang:</b>", get_sections_keyboard())
+
 
 @dp.callback_query(F.data.startswith("sec:"))
 async def cb_section(callback: types.CallbackQuery):
@@ -473,6 +521,7 @@ async def cb_section(callback: types.CallbackQuery):
         f"📂 <b>{title}</b>\n\nBlok-sxemasini chizish uchun masala raqamini tanlang:",
         get_problems_keyboard(sec)
     )
+
 
 @dp.callback_query(F.data.startswith("prob:"))
 async def cb_problem(callback: types.CallbackQuery):
@@ -499,6 +548,7 @@ async def cb_problem(callback: types.CallbackQuery):
         builder.as_markup()
     )
 
+
 # ================= WEB SERVER =================
 async def handle_index(request):
     return web.Response(
@@ -507,11 +557,14 @@ async def handle_index(request):
         headers={"Cache-Control": "no-store"}
     )
 
+
 async def handle_health(request):
     return web.Response(text="OK")
 
+
 async def handle_api_problems(request):
     return web.json_response({"sections": SECTION_NAMES, "problems": PROBLEMS_DB})
+
 
 async def handle_api_flowchart(request):
     sec = request.query.get("sec", "5.1")
@@ -524,6 +577,7 @@ async def handle_api_flowchart(request):
         return web.json_response({"status": "ok", "data": data})
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
+
 
 async def main():
     load_problems()
@@ -550,6 +604,7 @@ async def main():
         except Exception as e:
             print(f"Polling xatosi: {type(e).__name__}: {e}. 10 soniyadan keyin qayta uriniladi...")
             await asyncio.sleep(10)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
