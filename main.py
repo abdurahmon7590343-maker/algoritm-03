@@ -208,41 +208,51 @@ def clean_json_text(raw_text: str) -> str:
 
 
 SYSTEM_PROMPT = r"""
-Sen matematika va informatika o'qituvchisisanki, talaba daftariga yozgandek ENG TOZA, SODDA va MANTIQIY matematik Python kodi yozasan.
-Shu koddan avtomatik ravishda blok-sxema chiziladi. Faqat sof JSON qaytar:
+Sen matematika va informatika o'qituvchisisanki, talaba daftariga yozgandek ENG TOZA, SODDA va TABIIY matematik Python kodi yozasan.
+Shu koddan avtomatik blok-sxema chiziladi. Faqat sof JSON qaytar:
 {"explanation": "...", "input_format": "...", "test_input": "...", "code_python": "..."}
 
 QAT'IY QOIDALAR:
-1. O'ZGARUVCHILAR (ENG MUHIM):
-   - FAQAT 1-2 harfli matematik nomlar ishlat: a, b, c, d, d1, d2, d3, n, m, k, s, p, q, r, i, j, x, y, z, t, u, v, w, N, M, K, R, A, B.
-   - 3 va undan ko'p harfli inglizcha nomlar (sequence, result, count, visited, found, temp, flag, total, ans, num, mid, pos, arr, cur) QAT'IY TAQIQLANADI!
-2. ORTIQCHA FUNKSIYALARSIZ, LEKIN MANTIQIY BO'LAKLANGAN KOD:
+1. O'ZGARUVCHILAR (MASALADAN CHIQIB KETMA):
+   - Masalada berilgan aynan o'sha harflarni ishlat (masalan a, b, c, d yoki x, y, z yoki n, m, R, h).
+   - Masalada YO'Q tasodifiy harflarni (u, v, w, x, y, n, m, p, q) o'ylab topma!
+   - Faqat yig'indi/natija uchun `s` (bo'laklari uchun `s1, s2, s3`), sikl sanagichi uchun `i, j, k`, takrorlanuvchi qavs uchun `t` (yoki `t1, t2`) ishlat.
+   - 3 va undan ko'p harfli inglizcha nomlar (result, count, sequence, temp, flag, total) QAT'IY TAQIQLANADI!
+2. FORMULALARNI TO'G'RI YOZISH (NA BITTA UZUN QATOR, NA 15 TA MAYDA QATOR):
    - Oddiy qisqa formulani bitta qatorda yoz (masalan: s = (a + b) / 2).
-   - Katta, bir nechta kasr yoki qismdan iborat arifmetik ifodalarni (§-1.1, §-1.2 kabi) HECH QACHON bitta uzun `s = ...` qatoriga tiqma!
-     Har bir asosiy kasr yoki takrorlanuvchi qismni alohida qisqa matematik harfda (t, p, q, r yoki u, v, w) hisoblab, oxirida `s = p - q + r` ko'rinishida jamla.
-   - Masalada "darajaga ko'tarish amalidan foydalanmasdan" deyilsa, `**` va `pow` ISHLATMA: kvadrat uchun `t * t`, kub uchun `d * d * d` yoz (takroriy qavsni avval `t = ...` qilib ol, ikki marta ko'chirib yozma).
-   - TAQIQLANADI: def, class, lambda, break, continue, True, False, while True, .append(), .pop(), .sort(), .reverse(), .split(), .join(), sum(), min(), max(), sorted(), map(), zip(), enumerate(), round(), pow(), list(), dict(), set(), tuple().
+   - 2-3 ta katta kasrdan iborat ifodada (§-1.1, §-1.2):
+     * Har bir asosiy kasrni BITTA qatorda `s1 = ...`, `s2 = ...`, `s3 = ...` deb yoz, oxirida `s = s1 - s2 + s3` deb jamla.
+     * Kasr ichidagi oddiy amallarni (masalan `c * c`, `b + c * c`, `a * (b + c * c)`, `a * b - d - 1.45`) ALOHIDA o'zgaruvchiga bo'lib yuborma!
+     * `t` ni faqat biror uzun qavs kvadrat/kubga oshirilganda (`**` taqiqlangan joyda) ishlat.
+     * Hech qachon bir xil o'zgaruvchini (masalan `u`, `v`) ikki marta boshqa narsa uchun qayta ishlatma.
+   - §-1.1 da `**` va `pow` TAQIQLANADI: kvadrat uchun `a * a` yoki `t * t`, kub uchun `d * d * d` yoz.
+3. TAQIQLANGAN FUNKSIYALAR:
+   - def, class, lambda, break, continue, True, False, while True, .append(), .pop(), .sort(), .reverse(), .split(), .join(), sum(), min(), max(), sorted(), map(), zip(), enumerate(), round(), pow(), list(), dict(), set(), tuple().
    - Agar 1.8 (matnli masalalar) yoki 5.1.31 bo'lmasa: len() va str() ham TAQIQLANADI!
-   - Massiv kerak bo'lsa `a = [0] * n` (indeks bilan yoz, .append() ISHLATMA), matritsa kerak bo'lsa `A = [[0] * m for i in range(n)]` deb e'lon qil.
+   - Massiv: `a = [0] * n` (indeks bilan yoz). Matritsa: `A = [[0] * m for i in range(n)]`.
    - Kutubxona faqat juda zarur bo'lsa (sin, cos, tan, log, exp, sqrt, pi) `from math import ...` ishlat.
-3. KIRITISH VA CHIQARISH:
-   - Har bir kiritiladigan qiymat: `n = int(input("n = "))` yoki `x = float(input("x = "))`.
-   - Agar masalada barcha sonlar aniq berilgan bo'lsa (masalan [200, 300] oraliq) — input() ISHLATMA.
-   - Natijani ortiqcha so'zlarsiz chiqar: `print(s)` yoki `print("Ha")` / `print("Yo'q")`.
-4. ARIFMETIK IFODA UCHUN YAXSHI NAMUNA:
+4. KIRITISH VA CHIQARISH:
+   - Har bir kiritiladigan qiymat: `a = float(input("a = "))` yoki `n = int(input("n = "))`.
+   - Agar masalada barcha sonlar aniq berilgan bo'lsa — input() ISHLATMA.
+   - Natijani oddiy chiqar: `print(s)` yoki `print("Ha")` / `print("Yo'q")`.
+5. §-1.1 VA §-1.2 UCHUN NAMUNA (AYNAN SHU USLUBDA YOZ):
+   a = float(input("a = "))
+   b = float(input("b = "))
+   c = float(input("c = "))
+   d = float(input("d = "))
    t = 1 - (a + 2.9 * b)
-   p = (t * t) / (a * b - d - 1.45)
-   q = ((c - a) / d) / (a * (b + c * c))
-   r = a / (1 + 2 / c)
-   s = p - q + r
+   s1 = (t * t) / (a * b - d - 1.45)
+   s2 = ((c - a) / d) / (a * (b + c * c))
+   s3 = a / (1 + 2 / c)
+   s = s1 - s2 + s3
    print(s)
-5. TEZLIK VA XAVFSIZ TEST:
+6. TEZLIK VA XAVFSIZ TEST:
    - Cheksiz yoki sekin sikl yozma.
-   - `test_input` ga kichik, tez ishlaydigan va XATOSIZ (0 ga bo'linmaydigan, log/ildiz ichi musbat chiqadigan) namuna qiymatlar ber (masalan n=5, yoki a=2.5, b=3.1, c=1.8, d=0.7).
-6. Izohlar (#) YOZMA.
-7. JSON maydonlari:
+   - `test_input` ga kichik va XATOSIZ (0 ga bo'linmaydigan, log/ildiz ichi musbat chiqadigan) namuna qiymatlar ber.
+7. Izohlar (#) YOZMA.
+8. JSON maydonlari:
    - "explanation": 1-2 gapli qisqa o'zbekcha tushuntirish.
-   - "input_format": nimalarni qaysi tartibda kiritish kerakligi (bo'lmasa "Kiritish kerak emas").
+   - "input_format": kiritish tartibi (bo'lmasa "Kiritish kerak emas").
    - "test_input": har bir input() uchun alohida qiymat (\n bilan), bo'lmasa "".
    - "code_python": toza, qisqa, odam yozgandek matematik Python kodi.
 """
@@ -298,6 +308,13 @@ def _is_zero_matrix_comp(node: ast.ListComp) -> bool:
     return isinstance(elt, ast.List)
 
 
+def _node_has_input(node) -> bool:
+    for n in ast.walk(node):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "input":
+            return True
+    return False
+
+
 def check_code_style(tree, sec: str, num: str):
     bad = set()
     allow_str = (sec == "1.8" or f"{sec}.{num}" == "5.1.31")
@@ -329,15 +346,34 @@ def check_code_style(tree, sec: str, num: str):
                 bad.add(f"keraksiz funksiya {f.id}() taqiqlangan")
             if isinstance(f, ast.Attribute) and f.attr in banned_methods:
                 bad.add(f".{f.attr}() taqiqlangan, oddiy massiv indeksi a[i] ishlat")
+
+    # §-1.1 va §-1.2 uchun maxsus tozalik nazorati:
+    # masalada yo'q tasodifiy harflar va haddan tashqari maydalashni to'sadi.
+    if sec in {"1.1", "1.2"}:
+        allowed_vars = ({"a", "b", "c", "d"} if sec == "1.1" else {"x", "y", "z"}) | {
+            "s", "s1", "s2", "s3", "s4", "s5", "t", "t1", "t2", "t3"
+        }
+        calc_vars = []
+        for st in tree.body:
+            if isinstance(st, ast.Assign) and not _node_has_input(st.value):
+                for tgt in st.targets:
+                    if isinstance(tgt, ast.Name):
+                        if tgt.id not in allowed_vars:
+                            bad.add(f"masalada yo'q '{tgt.id}' belgilashi taqiqlangan; faqat s1, s2, s3, s va t ishlat")
+                        if tgt.id in calc_vars:
+                            bad.add(f"'{tgt.id}' o'zgaruvchisini qayta ishlatma, har bir kasr uchun alohida s1, s2, s3 yoz")
+                        calc_vars.append(tgt.id)
+        if len(calc_vars) < 2:
+            bad.add("katta ifodani bitta s = ... qatoriga tiqma; har bir asosiy kasrni s1, s2, s3 ga ajrat")
+        elif len(calc_vars) > 7:
+            bad.add("ifodani mayda amallarga (w=c*c, x=b+w kabi) bo'lib yuborma; har bir kasrni bitta s1, s2, s3 qatorida yoz (jami 3-6 qator)")
+
     if bad:
         raise ValueError("USLUB: " + "; ".join(sorted(bad)))
 
 
 def code_has_input(tree) -> bool:
-    for n in ast.walk(tree):
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "input":
-            return True
-    return False
+    return _node_has_input(tree)
 
 
 def _run_sync(code: str, test_input: str):
@@ -389,7 +425,7 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
     if hint:
         base_prompt += (
             f"\nYO'L-YO'RIQ (g'oyani ol, lekin .append() va uzun nomlar ishlatma, "
-            f"faqat 1-2 harfli nomlar va a[k] indeks bilan yoz): {hint}\n"
+            f"faqat masaladagi harflar hamda s, k, i, j, a[k] bilan yoz): {hint}\n"
         )
 
     last_err = None
@@ -447,7 +483,7 @@ async def generate_flowchart_ast(sec: str, num: str) -> dict:
                 warning = str(e)
             extra = (
                 f"\nOLDINGI JAVOBDA XATO BO'LDI: {e}\n"
-                f"Xatoni aniq tuzat: faqat 1-2 harfli matematik nomlar va oddiy arifmetika/sikllar ishlat.\n"
+                f"Xatoni aniq tuzatib, toza kodni qaytar.\n"
             )
             await asyncio.sleep(1.0)
 
