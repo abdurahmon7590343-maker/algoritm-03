@@ -5,6 +5,10 @@ import asyncio
 import ast
 import sys
 import subprocess
+import csv
+import io
+import sqlite3
+from datetime import datetime, timezone, timedelta
 import urllib.request
 import urllib.error
 import fitz  # PyMuPDF
@@ -12,7 +16,7 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import WebAppInfo
+from aiogram.types import WebAppInfo, BufferedInputFile
 from google import genai
 from google.genai import types as genai_types
 from flowchart_builder import code_to_nodes, validate_flowchart_nodes
@@ -34,7 +38,14 @@ PDF_BOB1_PATH = os.getenv("PDF_BOB1_PATH", "BLACKCURSE1.pdf")
 PROBLEMS_JSON = os.getenv("PROBLEMS_JSON", "problems.json")
 PROBLEMS_BOB1_JSON = os.getenv("PROBLEMS_BOB1_JSON", "problems_bob1.json")
 SOLUTIONS_CACHE_FILE = os.getenv("SOLUTIONS_CACHE_FILE", "solutions_cache.json")
+USERS_DB_FILE = os.getenv("USERS_DB_FILE", "users.db")
 PORT = int(os.getenv("PORT", 8080))
+
+# --- ADMIN SOZLAMALARI ---
+# Render'da ADMIN_IDS="123456789" (bir nechta bo'lsa vergul bilan: "123456,789012")
+_raw_admins = os.getenv("ADMIN_IDS") or os.getenv("ADMIN_ID", "")
+ADMIN_IDS = {int(x.strip()) for x in _raw_admins.split(",") if x.strip().isdigit()}
+NOTIFY_ALL_VIEWS = os.getenv("NOTIFY_ALL_VIEWS", "0") == "1"
 
 # --- GROQ API (katta bepul limitli asosiy provayder) ---
 _raw_groq_keys = (
@@ -100,6 +111,204 @@ SECTION_NAMES = {
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UZ_TZ = timezone(timedelta(hours=5))
+
+
+# ================= FOYDALANUVCHILAR STATISTIKASI (SQLite + ADMIN) =================
+def _now_uz() -> str:
+    return datetime.now(UZ_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _today_uz() -> str:
+    return datetime.now(UZ_TZ).strftime("%Y-%m-%d")
+
+
+def _html_esc(text: str) -> str:
+    return str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _users_db_path() -> str:
+    return USERS_DB_FILE if os.path.isabs(USERS_DB_FILE) else os.path.join(BASE_DIR, USERS_DB_FILE)
+
+
+def init_users_db():
+    conn = sqlite3.connect(_users_db_path())
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT DEFAULT '',
+                full_name TEXT DEFAULT '',
+                first_seen TEXT,
+                last_seen TEXT,
+                total_views INTEGER DEFAULT 0,
+                last_problem TEXT DEFAULT ''
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS views (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                problem TEXT,
+                source TEXT,
+                created_at TEXT
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_user_activity(user_id: int, username: str = "", full_name: str = "",
+                         problem: str = "", is_view: bool = False, source: str = "bot") -> bool:
+    """Foydalanuvchi faolligini bazaga yozadi. Yangi foydalanuvchi bo'lsa True qaytaradi."""
+    if not user_id:
+        return False
+    ts = _now_uz()
+    uname = (username or "").lstrip("@").strip()
+    fname = (full_name or "").strip()
+    prob = (problem or "").strip()
+
+    conn = sqlite3.connect(_users_db_path())
+    try:
+        row = conn.execute(
+            "SELECT username, full_name, total_views, last_problem FROM users WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        is_new = row is None
+        if is_new:
+            conn.execute(
+                "INSERT INTO users (user_id, username, full_name, first_seen, last_seen, total_views, last_problem) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, uname, fname or f"User {user_id}", ts, ts, 1 if is_view else 0, prob)
+            )
+        else:
+            old_uname, old_fname, old_views, old_prob = row
+            conn.execute(
+                "UPDATE users SET username = ?, full_name = ?, last_seen = ?, total_views = ?, last_problem = ? "
+                "WHERE user_id = ?",
+                (
+                    uname or old_uname,
+                    fname or old_fname,
+                    ts,
+                    (old_views or 0) + (1 if is_view else 0),
+                    prob or old_prob,
+                    user_id,
+                )
+            )
+        if is_view and prob:
+            conn.execute(
+                "INSERT INTO views (user_id, problem, source, created_at) VALUES (?, ?, ?, ?)",
+                (user_id, prob, source, ts)
+            )
+        conn.commit()
+        return is_new
+    except Exception as e:
+        print(f"Foydalanuvchi yozishda xato: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_admin_stats() -> dict:
+    today = _today_uz()
+    conn = sqlite3.connect(_users_db_path())
+    try:
+        total_users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        new_today = conn.execute("SELECT COUNT(*) FROM users WHERE first_seen LIKE ?", (today + "%",)).fetchone()[0]
+        active_today = conn.execute("SELECT COUNT(*) FROM users WHERE last_seen LIKE ?", (today + "%",)).fetchone()[0]
+        total_views = conn.execute("SELECT COUNT(*) FROM views").fetchone()[0]
+        views_today = conn.execute("SELECT COUNT(*) FROM views WHERE created_at LIKE ?", (today + "%",)).fetchone()[0]
+        top_problems = conn.execute(
+            "SELECT problem, COUNT(*) AS cnt FROM views GROUP BY problem ORDER BY cnt DESC LIMIT 5"
+        ).fetchall()
+        return {
+            "total_users": total_users,
+            "new_today": new_today,
+            "active_today": active_today,
+            "total_views": total_views,
+            "views_today": views_today,
+            "top_problems": top_problems,
+        }
+    finally:
+        conn.close()
+
+
+def get_users_list(order_by: str = "last_seen", limit: int = 20) -> list:
+    col = "total_views" if order_by == "total_views" else "last_seen"
+    conn = sqlite3.connect(_users_db_path())
+    try:
+        return conn.execute(
+            f"SELECT user_id, username, full_name, first_seen, last_seen, total_views, last_problem "
+            f"FROM users ORDER BY {col} DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def build_users_csv_bytes() -> bytes:
+    conn = sqlite3.connect(_users_db_path())
+    try:
+        rows = conn.execute(
+            "SELECT user_id, username, full_name, first_seen, last_seen, total_views, last_problem "
+            "FROM users ORDER BY last_seen DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["User ID", "Username", "Ism-Familiya", "Birinchi kirish", "Oxirgi faollik", "Ko'rilgan blok-sxemalar", "Oxirgi masala"])
+    for r in rows:
+        uid, uname, fname, fseen, lseen, tviews, lprob = r
+        writer.writerow([uid, f"@{uname}" if uname else "", fname, fseen, lseen, tviews, lprob])
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+
+async def _send_admin_notice(text: str):
+    if not ADMIN_IDS:
+        return
+    for aid in ADMIN_IDS:
+        try:
+            await bot.send_message(aid, text, parse_mode="HTML")
+        except Exception as e:
+            print(f"Adminga ({aid}) xabar yuborishda xato: {e}")
+
+
+def track_activity_bg(user_id: int, username: str = "", full_name: str = "",
+                      problem: str = "", is_view: bool = False, source: str = "bot"):
+    """Foydalanuvchi faolligini yozadi va kerak bo'lsa adminga xabar yuboradi."""
+    if not user_id:
+        return
+    is_new = record_user_activity(user_id, username, full_name, problem=problem, is_view=is_view, source=source)
+    if not ADMIN_IDS or user_id in ADMIN_IDS:
+        return
+
+    safe_name = _html_esc(full_name or f"User {user_id}")
+    uname_part = f" (@{_html_esc(username.lstrip('@'))})" if username else ""
+    user_link = f'<a href="tg://user?id={user_id}">{safe_name}</a>{uname_part}'
+
+    if is_new:
+        prob_line = f"\n📘 Masala: <b>{_html_esc(problem)}</b>" if problem else ""
+        msg = (
+            f"🆕 <b>Yangi foydalanuvchi!</b>\n"
+            f"👤 {user_link}\n"
+            f"🆔 <code>{user_id}</code>{prob_line}\n"
+            f"🕒 {_now_uz()}"
+        )
+        asyncio.create_task(_send_admin_notice(msg))
+    elif is_view and NOTIFY_ALL_VIEWS and problem:
+        msg = (
+            f"👀 <b>Blok-sxema ko'rildi</b>\n"
+            f"👤 {user_link} (<code>{user_id}</code>)\n"
+            f"📘 Masala: <b>{_html_esc(problem)}</b> ({source})\n"
+            f"🕒 {_now_uz()}"
+        )
+        asyncio.create_task(_send_admin_notice(msg))
+
+
+def is_admin(user_id: int) -> bool:
+    return bool(user_id and user_id in ADMIN_IDS)
 
 
 # ================= GROQ MODELLARINI AVTO-ANIQLASH =================
@@ -851,8 +1060,136 @@ async def safe_edit(callback: types.CallbackQuery, text: str, markup):
         print(f"edit_text xatosi: {e}")
 
 
+def get_admin_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Yangilash", callback_data="adm:stats")
+    builder.button(text="👥 Oxirgi 20 foydalanuvchi", callback_data="adm:recent")
+    builder.button(text="🏆 Eng faol 10 ta", callback_data="adm:top")
+    builder.button(text="📥 Excel (CSV) yuklab olish", callback_data="adm:export")
+    bell = "🔔 Har ko'rishda xabar: YOQILGAN" if NOTIFY_ALL_VIEWS else "🔕 Har ko'rishda xabar: O'CHIRILGAN"
+    builder.button(text=bell, callback_data="adm:toggle_views")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def format_admin_stats_text() -> str:
+    st = get_admin_stats()
+    top_lines = "\n".join(
+        f"   • <b>{_html_esc(p)}</b> — {c} marta" for p, c in st["top_problems"]
+    ) or "   • Hali ma'lumot yo'q"
+    return (
+        f"📊 <b>Bot statistikasi (Admin panel)</b>\n\n"
+        f"👥 Jami foydalanuvchilar: <b>{st['total_users']}</b>\n"
+        f"🆕 Bugun qo'shilganlar: <b>{st['new_today']}</b>\n"
+        f"🟢 Bugun faol bo'lganlar: <b>{st['active_today']}</b>\n"
+        f"📈 Jami ko'rilgan blok-sxemalar: <b>{st['total_views']}</b>\n"
+        f"⚡ Bugun ko'rilganlar: <b>{st['views_today']}</b>\n"
+        f"💾 Keshdagi tayyor masalalar: <b>{len(SOLUTIONS_DB)}</b>\n\n"
+        f"🔥 <b>Eng ko'p ko'rilgan masalalar:</b>\n{top_lines}\n\n"
+        f"🕒 Vaqt: {_now_uz()}"
+    )
+
+
+def format_users_text(rows: list, title: str) -> str:
+    if not rows:
+        return f"<b>{title}</b>\n\nHali foydalanuvchilar yo'q."
+    lines = [f"<b>{title}</b>\n"]
+    for idx, (uid, uname, fname, fseen, lseen, tviews, lprob) in enumerate(rows, 1):
+        safe_name = _html_esc(fname or f"User {uid}")
+        u_txt = f" @{_html_esc(uname)}" if uname else ""
+        p_txt = f" | oxirgi: {_html_esc(lprob)}" if lprob else ""
+        short_time = (lseen or "")[5:16]
+        lines.append(
+            f"{idx}. <a href=\"tg://user?id={uid}\">{safe_name}</a>{u_txt}\n"
+            f"    🆔 <code>{uid}</code> | 👁 {tviews}{p_txt} | 🕒 {short_time}"
+        )
+    text = "\n".join(lines)
+    return text[:3950] + "\n..." if len(text) > 3950 else text
+
+
+@dp.message(Command("myid"))
+async def cmd_myid(message: types.Message):
+    u = message.from_user
+    await message.answer(
+        f"🆔 Sizning Telegram ID raqamingiz: <code>{u.id}</code>\n"
+        f"Admin bo'lish uchun Render → Environment bo'limida:\n"
+        f"<code>ADMIN_IDS</code> = <code>{u.id}</code> deb saqlang.",
+        parse_mode="HTML"
+    )
+
+
+@dp.message(Command("admin", "stats"))
+async def cmd_admin(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Bu buyruq faqat admin uchun.")
+        return
+    await message.answer(format_admin_stats_text(), reply_markup=get_admin_keyboard(), parse_mode="HTML")
+
+
+@dp.message(Command("users"))
+async def cmd_users(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Bu buyruq faqat admin uchun.")
+        return
+    rows = get_users_list("last_seen", 20)
+    await message.answer(format_users_text(rows, "👥 Oxirgi 20 ta foydalanuvchi"), parse_mode="HTML")
+
+
+@dp.message(Command("export"))
+async def cmd_export(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Bu buyruq faqat admin uchun.")
+        return
+    csv_bytes = build_users_csv_bytes()
+    fname = f"foydalanuvchilar_{_today_uz()}.csv"
+    await message.answer_document(
+        BufferedInputFile(csv_bytes, filename=fname),
+        caption=f"📥 Barcha foydalanuvchilar ro'yxati ({_now_uz()})"
+    )
+
+
+@dp.callback_query(F.data.startswith("adm:"))
+async def cb_admin(callback: types.CallbackQuery):
+    global NOTIFY_ALL_VIEWS
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    action = callback.data.split(":")[1]
+    if action == "stats":
+        await callback.answer("Yangilandi")
+        await safe_edit(callback, format_admin_stats_text(), get_admin_keyboard())
+    elif action == "recent":
+        await callback.answer()
+        rows = get_users_list("last_seen", 20)
+        builder = InlineKeyboardBuilder()
+        builder.button(text="⬅️ Statistikaga qaytish", callback_data="adm:stats")
+        await safe_edit(callback, format_users_text(rows, "👥 Oxirgi 20 ta foydalanuvchi"), builder.as_markup())
+    elif action == "top":
+        await callback.answer()
+        rows = get_users_list("total_views", 10)
+        builder = InlineKeyboardBuilder()
+        builder.button(text="⬅️ Statistikaga qaytish", callback_data="adm:stats")
+        await safe_edit(callback, format_users_text(rows, "🏆 Eng faol 10 ta foydalanuvchi"), builder.as_markup())
+    elif action == "toggle_views":
+        NOTIFY_ALL_VIEWS = not NOTIFY_ALL_VIEWS
+        state = "yoqildi" if NOTIFY_ALL_VIEWS else "o'chirildi"
+        await callback.answer(f"Har ko'rishda xabar berish {state}")
+        await safe_edit(callback, format_admin_stats_text(), get_admin_keyboard())
+    elif action == "export":
+        await callback.answer("Fayl tayyorlanmoqda...")
+        csv_bytes = build_users_csv_bytes()
+        fname = f"foydalanuvchilar_{_today_uz()}.csv"
+        await callback.message.answer_document(
+            BufferedInputFile(csv_bytes, filename=fname),
+            caption=f"📥 Barcha foydalanuvchilar ro'yxati ({_now_uz()})"
+        )
+
+
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
+    u = message.from_user
+    if u:
+        track_activity_bg(u.id, u.username or "", u.full_name or "", source="bot")
     await message.answer(
         "📐 <b>Blok-Sxema va Python Kod Generator Boti</b>\n\n"
         "Kitobdagi (I va V BOB) barcha masalalarning toza blok-sxemasini va sodda matematik Python kodini ko'rish uchun bo'limni tanlang:",
@@ -883,6 +1220,9 @@ async def cb_section(callback: types.CallbackQuery):
 async def cb_problem(callback: types.CallbackQuery):
     await callback.answer()
     _, sec, num = callback.data.split(":")
+    u = callback.from_user
+    if u:
+        track_activity_bg(u.id, u.username or "", u.full_name or "", problem=f"{sec} #{num}", is_view=False, source="bot")
     prob_text = PROBLEMS_DB.get(sec, {}).get(num, "Masala matni yuklanmoqda...")
     if len(prob_text) > 900:
         prob_text = prob_text[:900] + "..."
@@ -928,6 +1268,7 @@ async def handle_status(request):
         "gemini_models": GEMINI_MODELS,
         "cached_solutions": len(SOLUTIONS_DB),
         "total_problems": sum(len(v) for v in PROBLEMS_DB.values()),
+        "admins_configured": len(ADMIN_IDS),
     })
 
 
@@ -939,6 +1280,11 @@ async def handle_api_flowchart(request):
     sec = request.query.get("sec", "1.1")
     num = request.query.get("num", "1")
     force = request.query.get("force", "0") == "1"
+    uid_raw = (request.query.get("uid") or "").strip()
+    if uid_raw.isdigit():
+        uname = (request.query.get("uname") or "").strip()[:64]
+        fname = (request.query.get("fname") or "").strip()[:120]
+        track_activity_bg(int(uid_raw), uname, fname, problem=f"{sec} #{num}", is_view=True, source="webapp")
     try:
         data = await generate_flowchart_ast(sec, num, force=force)
         return web.json_response({"status": "ok", "data": data})
@@ -947,8 +1293,10 @@ async def handle_api_flowchart(request):
 
 
 async def main():
+    init_users_db()
     load_problems()
     load_solutions_cache()
+    print(f"Admin IDs: {sorted(ADMIN_IDS) if ADMIN_IDS else 'sozlanmagan (Render da ADMIN_IDS ni kiriting)'}")
     if GROQ_API_KEYS:
         await asyncio.to_thread(discover_groq_models)
     print(
