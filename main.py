@@ -27,6 +27,7 @@ WEBAPP_URL = (
 ).rstrip("/")
 
 GROQ_API_URL = "https://" + "api.groq.com/openai/v1/chat/completions"
+GROQ_MODELS_URL = "https://" + "api.groq.com/openai/v1/models"
 
 PDF_PATH = os.getenv("PDF_PATH", "BLACKCURSE.pdf")
 PDF_BOB1_PATH = os.getenv("PDF_BOB1_PATH", "BLACKCURSE1.pdf")
@@ -44,11 +45,10 @@ _raw_groq_keys = (
 )
 GROQ_API_KEYS = [k.strip() for k in _raw_groq_keys.split(",") if k.strip()]
 
-_raw_groq_models = os.getenv("GROQ_MODELS") or os.getenv(
-    "GROQ_MODEL", "llama-3.3-70b-versatile,llama-3.1-8b-instant"
-)
+_raw_groq_models = os.getenv("GROQ_MODELS") or os.getenv("GROQ_MODEL", "")
 GROQ_MODELS = [m.strip() for m in _raw_groq_models.split(",") if m.strip()]
 _groq_key_idx = 0
+_groq_discovered = False
 
 # --- GEMINI API (zaxira provayder) ---
 _raw_keys = os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY", "")
@@ -58,8 +58,8 @@ GEMINI_API_KEYS = [
 ]
 
 _raw_models = os.getenv("GEMINI_MODELS") or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-GEMINI_MODELS = [m.strip() for m in _raw_models.split(",") if m.strip()]
-for _fallback_model in ("gemini-2.5-flash-lite", "gemini-2.0-flash"):
+GEMINI_MODELS = [m.strip() for m in _raw_models.split(",") if m.strip() and "2.0" not in m]
+for _fallback_model in ("gemini-2.5-flash", "gemini-2.5-flash-lite"):
     if _fallback_model not in GEMINI_MODELS:
         GEMINI_MODELS.append(_fallback_model)
 
@@ -100,6 +100,70 @@ SECTION_NAMES = {
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+# ================= GROQ MODELLARINI AVTO-ANIQLASH =================
+_GROQ_SKIP_KEYWORDS = ("whisper", "tts", "guard", "orpheus", "playai", "embed", "moderation", "compound")
+_GROQ_PREFER_KEYWORDS = ("70b", "qwen", "llama-4", "llama-3.3", "deepseek", "gpt-oss", "kimi", "mixtral", "gemma")
+
+
+def _groq_model_rank(model_id: str) -> tuple:
+    low = model_id.lower()
+    for idx, kw in enumerate(_GROQ_PREFER_KEYWORDS):
+        if kw in low:
+            return (0, idx, low)
+    return (1, 99, low)
+
+
+def discover_groq_models(force: bool = False) -> list:
+    """Groq API kalitiga ochiq bo'lgan faol matnli modellarni avtomatik aniqlaydi."""
+    global GROQ_MODELS, _groq_discovered
+    if _groq_discovered and GROQ_MODELS and not force:
+        return GROQ_MODELS
+    if not GROQ_API_KEYS:
+        return GROQ_MODELS
+
+    discovered = []
+    for api_key in GROQ_API_KEYS:
+        req = urllib.request.Request(
+            GROQ_MODELS_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "Mozilla/5.0",
+            },
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            for item in body.get("data", []):
+                mid = str(item.get("id", "")).strip()
+                if not mid:
+                    continue
+                low = mid.lower()
+                if any(bad in low for bad in _GROQ_SKIP_KEYWORDS):
+                    continue
+                if mid not in discovered:
+                    discovered.append(mid)
+            if discovered:
+                break
+        except Exception as e:
+            print(f"Groq modellari ro'yxatini olishda xato: {e}")
+
+    if discovered:
+        discovered.sort(key=_groq_model_rank)
+        # Foydalanuvchi qo'lda bergan modellar ro'yxatda bo'lsa, oldinga qo'yiladi
+        merged = [m for m in GROQ_MODELS if m in discovered]
+        for m in discovered:
+            if m not in merged:
+                merged.append(m)
+        GROQ_MODELS = merged[:6]
+        _groq_discovered = True
+        print(f"Groq faol modellar aniqlandi: {GROQ_MODELS}")
+    elif not GROQ_MODELS:
+        GROQ_MODELS = ["llama-3.3-70b-versatile", "qwen/qwen3-32b", "openai/gpt-oss-120b"]
+
+    return GROQ_MODELS
 
 
 # ================= SOLUTIONS_CACHE.JSON BAZASI =================
@@ -291,6 +355,8 @@ def load_problems():
 # ================= AI GENERATOR (GROQ + GEMINI) =================
 def clean_json_text(raw_text: str) -> str:
     text = (raw_text or "").strip()
+    # Ba'zi modellar (Qwen/DeepSeek) <think>...</think> bloki qaytarishi mumkin
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
@@ -428,14 +494,13 @@ def _call_groq_once(api_key: str, model_name: str, user_prompt: str, force_json:
             err_body = e.read().decode("utf-8", errors="ignore")[:240]
         except Exception:
             pass
-        # Groq json_validate_failed (HTTP 400) bersa, response_format'siz 1 marta qayta urinamiz
-        if e.code == 400 and force_json and "json_validate_failed" in err_body:
+        if e.code == 400 and force_json:
             return _call_groq_once(api_key, model_name, user_prompt, force_json=False)
         raise RuntimeError(f"Groq HTTP {e.code}: {err_body}")
 
 
 def _call_ai(user_prompt: str) -> str:
-    """Avval Groq (katta bepul limit), u bo'lmasa yoki xato bersa Gemini ishlatadi."""
+    """Avval Groq (faol modellarni avto-aniqlab), u bo'lmasa Gemini ishlatadi."""
     global _groq_key_idx, _gemini_key_idx
     if not GROQ_API_KEYS and not _GEMINI_CLIENTS:
         raise AllProvidersFailedError("Render'da GROQ_API_KEY ham, GEMINI_API_KEY ham kiritilmagan.")
@@ -444,10 +509,11 @@ def _call_ai(user_prompt: str) -> str:
 
     # 1) GROQ API
     if not GROQ_API_KEYS:
-        diagnostics.append("Groq: kalit kiritilmagan (GROQ_API_KEY bo'sh)")
+        diagnostics.append("Groq: kalit kiritilmagan")
     else:
-        groq_last = ""
-        for model_name in GROQ_MODELS:
+        models = discover_groq_models()
+        groq_errs = []
+        for model_name in models:
             for step in range(len(GROQ_API_KEYS)):
                 idx = (_groq_key_idx + step) % len(GROQ_API_KEYS)
                 try:
@@ -455,18 +521,19 @@ def _call_ai(user_prompt: str) -> str:
                     _groq_key_idx = idx
                     return text
                 except Exception as e:
-                    groq_last = f"{model_name}: {str(e)[:140]}"
+                    short_e = "429 limit" if _is_quota_error(e) else str(e)[:120]
+                    groq_errs.append(f"{model_name}({short_e})")
                     print(f"Groq o'tkazildi (kalit #{idx + 1}, {model_name}): {e}")
                     continue
-        if groq_last:
-            diagnostics.append(f"Groq xatosi -> {groq_last}")
+        if groq_errs:
+            diagnostics.append("Groq: " + "; ".join(groq_errs[:3]))
 
     # 2) GEMINI API (zaxira)
     if not _GEMINI_CLIENTS:
         diagnostics.append("Gemini: kalit kiritilmagan")
     else:
         full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
-        gemini_last = ""
+        gemini_errs = []
         for model_name in GEMINI_MODELS:
             for step in range(len(_GEMINI_CLIENTS)):
                 idx = (_gemini_key_idx + step) % len(_GEMINI_CLIENTS)
@@ -490,12 +557,12 @@ def _call_ai(user_prompt: str) -> str:
                     _gemini_key_idx = idx
                     return resp.text
                 except Exception as e:
-                    short_e = "429 limit tugadi" if _is_quota_error(e) else str(e)[:120]
-                    gemini_last = f"{model_name}: {short_e}"
+                    short_e = "429 limit" if _is_quota_error(e) else str(e)[:100]
+                    gemini_errs.append(f"{model_name}({short_e})")
                     print(f"Gemini o'tkazildi (kalit #{idx + 1}, {model_name}): {short_e}")
                     continue
-        if gemini_last:
-            diagnostics.append(f"Gemini xatosi -> {gemini_last}")
+        if gemini_errs:
+            diagnostics.append("Gemini: " + "; ".join(gemini_errs[:3]))
 
     raise AllProvidersFailedError(" | ".join(diagnostics))
 
@@ -852,6 +919,8 @@ async def handle_health(request):
 
 
 async def handle_status(request):
+    if GROQ_API_KEYS and not _groq_discovered:
+        await asyncio.to_thread(discover_groq_models)
     return web.json_response({
         "groq_keys": len(GROQ_API_KEYS),
         "groq_models": GROQ_MODELS,
@@ -880,6 +949,8 @@ async def handle_api_flowchart(request):
 async def main():
     load_problems()
     load_solutions_cache()
+    if GROQ_API_KEYS:
+        await asyncio.to_thread(discover_groq_models)
     print(
         f"Groq kalitlar: {len(GROQ_API_KEYS)} ta ({GROQ_MODELS}) | "
         f"Gemini kalitlar: {len(_GEMINI_CLIENTS)} ta ({GEMINI_MODELS})"
