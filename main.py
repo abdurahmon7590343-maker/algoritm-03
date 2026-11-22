@@ -5,6 +5,8 @@ import asyncio
 import ast
 import sys
 import subprocess
+import urllib.request
+import urllib.error
 import fitz  # PyMuPDF
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
@@ -28,14 +30,26 @@ PDF_PATH = os.getenv("PDF_PATH", "BLACKCURSE.pdf")
 PDF_BOB1_PATH = os.getenv("PDF_BOB1_PATH", "BLACKCURSE1.pdf")
 PROBLEMS_JSON = os.getenv("PROBLEMS_JSON", "problems.json")
 PROBLEMS_BOB1_JSON = os.getenv("PROBLEMS_BOB1_JSON", "problems_bob1.json")
+SOLUTIONS_CACHE_FILE = os.getenv("SOLUTIONS_CACHE_FILE", "solutions_cache.json")
 PORT = int(os.getenv("PORT", 8080))
 
-# Bir nechta API kalit (vergul bilan): GEMINI_API_KEYS="key1,key2,key3"
-# Yoki bitta kalit: GEMINI_API_KEY="key1"
-_raw_keys = os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY", "")
-GEMINI_API_KEYS = [k.strip() for k in _raw_keys.split(",") if k.strip()]
+# --- GROQ API (katta bepul limitli asosiy provayder) ---
+_raw_groq_keys = os.getenv("GROQ_API_KEYS") or os.getenv("GROQ_API_KEY", "")
+GROQ_API_KEYS = [k.strip() for k in _raw_groq_keys.split(",") if k.strip()]
 
-# Zaxira modellar ro'yxati: biri 429 bersa keyingisiga o'tadi
+_raw_groq_models = os.getenv("GROQ_MODELS") or os.getenv(
+    "GROQ_MODEL", "llama-3.3-70b-versatile,llama-3.1-8b-instant"
+)
+GROQ_MODELS = [m.strip() for m in _raw_groq_models.split(",") if m.strip()]
+_groq_key_idx = 0
+
+# --- GEMINI API (zaxira provayder) ---
+_raw_keys = os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_KEYS = [
+    k.strip() for k in _raw_keys.split(",")
+    if k.strip() and k.strip() != "GEMINI_API_KEYINGIZNI_SHU_YERGA_YOZING"
+]
+
 _raw_models = os.getenv("GEMINI_MODELS") or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_MODELS = [m.strip() for m in _raw_models.split(",") if m.strip()]
 for _fallback_model in ("gemini-2.5-flash-lite", "gemini-2.0-flash"):
@@ -46,14 +60,16 @@ _GEMINI_CLIENTS = [
     genai.Client(api_key=k, http_options={"api_version": "v1beta"})
     for k in GEMINI_API_KEYS
 ]
-_key_idx = 0
+_gemini_key_idx = 0
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 PROBLEMS_DB = {}
 HINTS = {}
-FLOWCHART_CACHE = {}
+SOLUTIONS_DB = {}       # solutions_cache.json dan o'qilgan/saqlangan yechimlar
+FLOWCHART_CACHE = {}    # RAM kesh (tayyor nodes bilan)
+_PROBLEM_LOCKS = {}     # Bir vaqtda bir masalani ochgan talabalar uchun navbat
 
 SECTION_NAMES = {
     "1.1": "§-1.1. Arifmetik ifodalar",
@@ -76,6 +92,67 @@ SECTION_NAMES = {
     "5.7": "§-5.7. Matrisalar algebrasi",
 }
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+# ================= SOLUTIONS_CACHE.JSON BAZASI =================
+def _solutions_cache_path() -> str:
+    return (
+        SOLUTIONS_CACHE_FILE
+        if os.path.isabs(SOLUTIONS_CACHE_FILE)
+        else os.path.join(BASE_DIR, SOLUTIONS_CACHE_FILE)
+    )
+
+
+def load_solutions_cache():
+    path = _solutions_cache_path()
+    if not os.path.exists(path):
+        print("solutions_cache.json hali mavjud emas (yangi yechimlar saqlanib boradi).")
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            SOLUTIONS_DB.update(data)
+            print(f"solutions_cache.json o'qildi: {len(SOLUTIONS_DB)} ta tayyor yechim")
+    except Exception as e:
+        print(f"solutions_cache.json o'qishda xato: {e}")
+
+
+def save_solution_to_disk(cache_key: str, item: dict):
+    SOLUTIONS_DB[cache_key] = {
+        "explanation": item.get("explanation", ""),
+        "input_format": item.get("input_format", ""),
+        "sample_input": item.get("sample_input", ""),
+        "code_python": item.get("code_python", ""),
+    }
+    path = _solutions_cache_path()
+    try:
+        tmp_path = path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(SOLUTIONS_DB, f, ensure_ascii=False, indent=1)
+        os.replace(tmp_path, path)
+    except Exception as e:
+        print(f"solutions_cache.json saqlashda xato: {e}")
+
+
+def build_result_from_cached(sec: str, num: str, cached: dict, prob_text: str):
+    code = ensure_input_prompts(str(cached.get("code_python", "")).replace("\r\n", "\n").strip("\n"))
+    if not code.strip():
+        return None
+    nodes = code_to_nodes(code)
+    if not nodes:
+        return None
+    return {
+        "title": f"{SECTION_NAMES.get(sec, sec)}. {num}-masala",
+        "explanation": cached.get("explanation", ""),
+        "input_format": cached.get("input_format", ""),
+        "sample_input": cached.get("sample_input", ""),
+        "code_python": code,
+        "nodes": nodes,
+        "problem_text": prob_text,
+    }
+
 
 # ================= PDF VA JSON PARSERLAR =================
 def _parse_numbered_block(sec_body: str, prefix: str = "") -> dict:
@@ -95,8 +172,7 @@ def _parse_numbered_block(sec_body: str, prefix: str = "") -> dict:
 
 
 def load_bob1_from_pdf(pdf_path: str):
-    base = os.path.dirname(os.path.abspath(__file__))
-    path = pdf_path if os.path.isabs(pdf_path) else os.path.join(base, pdf_path)
+    path = pdf_path if os.path.isabs(pdf_path) else os.path.join(BASE_DIR, pdf_path)
     if not os.path.exists(path):
         print(f"DIQQAT: {path} topilmadi (I bob yuklanmadi).")
         return
@@ -176,9 +252,7 @@ def load_problems_from_pdf(pdf_path: str):
 
 
 def load_problems():
-    base = os.path.dirname(os.path.abspath(__file__))
-
-    p1 = PROBLEMS_BOB1_JSON if os.path.isabs(PROBLEMS_BOB1_JSON) else os.path.join(base, PROBLEMS_BOB1_JSON)
+    p1 = PROBLEMS_BOB1_JSON if os.path.isabs(PROBLEMS_BOB1_JSON) else os.path.join(BASE_DIR, PROBLEMS_BOB1_JSON)
     if os.path.exists(p1):
         try:
             with open(p1, "r", encoding="utf-8") as f:
@@ -192,7 +266,7 @@ def load_problems():
     else:
         load_bob1_from_pdf(PDF_BOB1_PATH)
 
-    path = PROBLEMS_JSON if os.path.isabs(PROBLEMS_JSON) else os.path.join(base, PROBLEMS_JSON)
+    path = PROBLEMS_JSON if os.path.isabs(PROBLEMS_JSON) else os.path.join(BASE_DIR, PROBLEMS_JSON)
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -207,7 +281,7 @@ def load_problems():
     load_problems_from_pdf(PDF_PATH)
 
 
-# ================= AI GENERATOR =================
+# ================= AI GENERATOR (GROQ + GEMINI) =================
 def clean_json_text(raw_text: str) -> str:
     text = (raw_text or "").strip()
     if text.startswith("```"):
@@ -298,19 +372,75 @@ def _is_quota_error(err: Exception) -> bool:
         "429" in msg
         or "RESOURCE_EXHAUSTED" in msg
         or "Quota exceeded" in msg
+        or "rate_limit" in msg.lower()
         or "kunlik limiti tugadi" in msg
     )
 
 
-def _call_gemini(prompt: str):
-    global _key_idx
-    if not _GEMINI_CLIENTS:
-        raise RuntimeError("GEMINI_API_KEY yoki GEMINI_API_KEYS sozlanmagan")
+def _call_groq_once(api_key: str, model_name: str, user_prompt: str) -> str:
+    payload = json.dumps({
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 4096,
+        "response_format": {"type": "json_object"},
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        return body["choices"][0]["message"]["content"]
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8", errors="ignore")[:300]
+        except Exception:
+            pass
+        raise RuntimeError(f"Groq HTTP {e.code}: {err_body}")
+
+
+def _call_ai(user_prompt: str) -> str:
+    """Avval Groq (katta bepul limit), u bo'lmasa yoki tugasa Gemini ishlatadi."""
+    global _groq_key_idx, _gemini_key_idx
+    if not GROQ_API_KEYS and not _GEMINI_CLIENTS:
+        raise RuntimeError("GROQ_API_KEY yoki GEMINI_API_KEY sozlanmagan")
 
     last_err = None
+
+    # 1) GROQ API
+    for model_name in GROQ_MODELS:
+        for step in range(len(GROQ_API_KEYS)):
+            idx = (_groq_key_idx + step) % len(GROQ_API_KEYS)
+            try:
+                text = _call_groq_once(GROQ_API_KEYS[idx], model_name, user_prompt)
+                _groq_key_idx = idx
+                return text
+            except Exception as e:
+                last_err = e
+                msg = str(e)
+                if _is_quota_error(e) or "404" in msg or "400" in msg or "401" in msg or "503" in msg:
+                    print(f"Groq o'tkazildi: kalit #{idx + 1}, model={model_name} ({msg[:120]})")
+                    continue
+                raise
+
+    # 2) GEMINI API (zaxira)
+    full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
     for model_name in GEMINI_MODELS:
         for step in range(len(_GEMINI_CLIENTS)):
-            idx = (_key_idx + step) % len(_GEMINI_CLIENTS)
+            idx = (_gemini_key_idx + step) % len(_GEMINI_CLIENTS)
             client = _GEMINI_CLIENTS[idx]
             cfg = dict(
                 response_mime_type="application/json",
@@ -325,18 +455,19 @@ def _call_gemini(prompt: str):
             try:
                 resp = client.models.generate_content(
                     model=model_name,
-                    contents=prompt,
+                    contents=full_prompt,
                     config=genai_types.GenerateContentConfig(**cfg)
                 )
-                _key_idx = idx
-                return resp
+                _gemini_key_idx = idx
+                return resp.text
             except Exception as e:
                 last_err = e
                 msg = str(e)
                 if _is_quota_error(e) or "404" in msg or "NOT_FOUND" in msg:
-                    print(f"O'tkazildi: kalit #{idx + 1}, model={model_name} ({type(e).__name__})")
+                    print(f"Gemini o'tkazildi: kalit #{idx + 1}, model={model_name} ({type(e).__name__})")
                     continue
                 raise
+
     raise RuntimeError(f"Barcha API kalit va modellarning kunlik limiti tugadi: {last_err}")
 
 
@@ -410,7 +541,6 @@ def check_code_style(tree, sec: str, num: str):
             else:
                 bad.add("murakkab funksiya chaqiruvi taqiqlangan")
 
-    # §-1.1 va §-1.2: t, u, v, w kabi ortiqcha belgilashlarni taqiqlaydi (faqat s1, s2, s3, s)
     if sec in {"1.1", "1.2"}:
         allowed_vars = ({"a", "b", "c", "d"} if sec == "1.1" else {"x", "y", "z"}) | {
             "s", "s1", "s2", "s3", "s4", "s5"
@@ -472,101 +602,115 @@ async def verify_run(code: str, test_input: str, has_input: bool):
         raise ValueError("Dastur hech narsa chiqarmadi (print yo'q)")
 
 
-async def generate_flowchart_ast(sec: str, num: str) -> dict:
+async def generate_flowchart_ast(sec: str, num: str, force: bool = False) -> dict:
     cache_key = f"{sec}_{num}"
-    if cache_key in FLOWCHART_CACHE:
-        return FLOWCHART_CACHE[cache_key]
+    lock = _PROBLEM_LOCKS.setdefault(cache_key, asyncio.Lock())
 
-    prob_text = PROBLEMS_DB.get(sec, {}).get(num, f"§-{sec} bo'lim, {num}-masala.")
-    hint = HINTS.get(f"{sec}.{num}")
-    base_prompt = (
-        f"{SYSTEM_PROMPT}\n\n"
-        f"Bo'lim: {SECTION_NAMES.get(sec, sec)}\n"
-        f"Masala #{num}: {prob_text}\n"
-    )
-    if hint:
-        base_prompt += (
-            f"\nYO'L-YO'RIQ (g'oyani ol, lekin ord/chr/.append va uzun nomlar ishlatma, "
-            f"faqat masaladagi harflar hamda s, k, i, j, a[k] bilan yoz): {hint}\n"
+    async with lock:
+        prob_text = PROBLEMS_DB.get(sec, {}).get(num, f"§-{sec} bo'lim, {num}-masala.")
+
+        if not force:
+            if cache_key in FLOWCHART_CACHE:
+                return FLOWCHART_CACHE[cache_key]
+            # solutions_cache.json bazasidan tekshiramiz (0 ta API so'rov!)
+            cached = SOLUTIONS_DB.get(cache_key)
+            if cached:
+                try:
+                    built = build_result_from_cached(sec, num, cached, prob_text)
+                    if built:
+                        FLOWCHART_CACHE[cache_key] = built
+                        return built
+                except Exception as e:
+                    print(f"Keshdagi yechimda xato ({cache_key}): {e}")
+
+        hint = HINTS.get(f"{sec}.{num}")
+        user_prompt = (
+            f"Bo'lim: {SECTION_NAMES.get(sec, sec)}\n"
+            f"Masala #{num}: {prob_text}\n"
         )
-
-    last_err = None
-    extra = ""
-    result = None
-    clean_candidate = None
-
-    for attempt in range(4):
-        try:
-            response = await asyncio.wait_for(
-                asyncio.to_thread(_call_gemini, base_prompt + extra), timeout=75
+        if hint:
+            user_prompt += (
+                f"\nYO'L-YO'RIQ (g'oyani ol, lekin ord/chr/.append va uzun nomlar ishlatma, "
+                f"faqat masaladagi harflar hamda s, k, i, j, a[k] bilan yoz): {hint}\n"
             )
-            data = json.loads(clean_json_text(response.text))
-            if isinstance(data, list) and data:
-                data = data[0]
-            if not isinstance(data, dict):
-                raise ValueError("AI noto'g'ri formatda javob qaytardi")
 
-            code = str(data.get("code_python", "")).replace("\r\n", "\n").strip("\n")
-            if not code.strip():
-                raise ValueError("AI kod qaytarmadi")
-            code = ensure_input_prompts(code)
+        last_err = None
+        extra = ""
+        result = None
+        clean_candidate = None
 
-            tree = check_code_safety(code)
-            nodes = code_to_nodes(code)
-            if not nodes:
-                raise ValueError("Koddan blok-sxema qurib bo'lmadi")
+        for attempt in range(4):
+            try:
+                raw_text = await asyncio.wait_for(
+                    asyncio.to_thread(_call_ai, user_prompt + extra), timeout=65
+                )
+                data = json.loads(clean_json_text(raw_text))
+                if isinstance(data, list) and data:
+                    data = data[0]
+                if not isinstance(data, dict):
+                    raise ValueError("AI noto'g'ri formatda javob qaytardi")
 
-            # 1) Blok-sxemaga birorta ham Python kodi kirmaganini tekshirish
-            validate_flowchart_nodes(nodes)
+                code = str(data.get("code_python", "")).replace("\r\n", "\n").strip("\n")
+                if not code.strip():
+                    raise ValueError("AI kod qaytarmadi")
+                code = ensure_input_prompts(code)
 
-            test_input = str(data.get("test_input", "") or "").replace("\\n", "\n")
-            if test_input and not test_input.endswith("\n"):
-                test_input += "\n"
+                tree = check_code_safety(code)
+                nodes = code_to_nodes(code)
+                if not nodes:
+                    raise ValueError("Koddan blok-sxema qurib bo'lmadi")
 
-            # 2) Kodning xatosiz ishlashini tekshirish
-            await verify_run(code, test_input, code_has_input(tree))
+                # 1) Blok-sxemaga birorta ham Python kodi kirmaganini tekshirish
+                validate_flowchart_nodes(nodes)
 
-            cand = {
-                "title": f"{SECTION_NAMES.get(sec, sec)}. {num}-masala",
-                "explanation": data.get("explanation", ""),
-                "input_format": data.get("input_format", ""),
-                "sample_input": test_input.strip("\n"),
-                "code_python": code,
-                "nodes": nodes,
-                "problem_text": prob_text,
-            }
-            clean_candidate = cand
+                test_input = str(data.get("test_input", "") or "").replace("\\n", "\n")
+                if test_input and not test_input.endswith("\n"):
+                    test_input += "\n"
 
-            # 3) Qat'iy oq ro'yxat va ortiqcha belgilashlar tekshiruvi
-            check_code_style(tree, sec, num)
+                # 2) Kodning xatosiz ishlashini tekshirish
+                await verify_run(code, test_input, code_has_input(tree))
 
-            result = cand
-            break
-        except Exception as e:
-            last_err = e
-            print(f"Generatsiya xatosi (urinish {attempt + 1}): {e}")
-            if _is_quota_error(e):
+                cand = {
+                    "title": f"{SECTION_NAMES.get(sec, sec)}. {num}-masala",
+                    "explanation": data.get("explanation", ""),
+                    "input_format": data.get("input_format", ""),
+                    "sample_input": test_input.strip("\n"),
+                    "code_python": code,
+                    "nodes": nodes,
+                    "problem_text": prob_text,
+                }
+                clean_candidate = cand
+
+                # 3) Qat'iy oq ro'yxat va ortiqcha belgilashlar tekshiruvi
+                check_code_style(tree, sec, num)
+
+                result = cand
                 break
-            extra = (
-                f"\nOLDINGI JAVOBDA XATO BO'LDI: {e}\n"
-                f"Xatoni 100% tuzat: ord/chr/metodlar va ortiqcha o'zgaruvchilarsiz toza matematik kod qaytar.\n"
-            )
-            await asyncio.sleep(1.0)
+            except Exception as e:
+                last_err = e
+                print(f"Generatsiya xatosi (urinish {attempt + 1}): {e}")
+                if _is_quota_error(e):
+                    break
+                extra = (
+                    f"\nOLDINGI JAVOBDA XATO BO'LDI: {e}\n"
+                    f"Xatoni 100% tuzat: ord/chr/metodlar va ortiqcha o'zgaruvchilarsiz toza matematik kod qaytar.\n"
+                )
+                await asyncio.sleep(0.8)
 
-    if result is None and clean_candidate is not None:
-        result = clean_candidate
+        if result is None and clean_candidate is not None:
+            result = clean_candidate
 
-    if result is None:
-        if last_err is not None and _is_quota_error(last_err):
-            raise RuntimeError("API kunlik limiti tugadi. Render'da GEMINI_API_KEYS ga yangi kalit qo'shing.")
-        raise RuntimeError(f"Toza blok-sxema yaratib bo'lmadi (qayta urining): {last_err}")
+        if result is None:
+            if last_err is not None and _is_quota_error(last_err):
+                raise RuntimeError("API kunlik limiti tugadi. Render'da GROQ_API_KEY yoki GEMINI_API_KEYS ni tekshiring.")
+            raise RuntimeError(f"Toza blok-sxema yaratib bo'lmadi (qayta urining): {last_err}")
 
-    FLOWCHART_CACHE[cache_key] = result
-    return result
+        FLOWCHART_CACHE[cache_key] = result
+        save_solution_to_disk(cache_key, result)
+        return result
 
 
 # ================= MINI APP HTML =================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(BASE_DIR, "index.html")
 
 
@@ -687,11 +831,9 @@ async def handle_api_problems(request):
 async def handle_api_flowchart(request):
     sec = request.query.get("sec", "1.1")
     num = request.query.get("num", "1")
-    force = request.query.get("force", "0")
-    if force == "1":
-        FLOWCHART_CACHE.pop(f"{sec}_{num}", None)
+    force = request.query.get("force", "0") == "1"
     try:
-        data = await generate_flowchart_ast(sec, num)
+        data = await generate_flowchart_ast(sec, num, force=force)
         return web.json_response({"status": "ok", "data": data})
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
@@ -699,7 +841,11 @@ async def handle_api_flowchart(request):
 
 async def main():
     load_problems()
-    print(f"API kalitlar: {len(_GEMINI_CLIENTS)} ta | Modellar: {GEMINI_MODELS}")
+    load_solutions_cache()
+    print(
+        f"Groq kalitlar: {len(GROQ_API_KEYS)} ta ({GROQ_MODELS}) | "
+        f"Gemini kalitlar: {len(_GEMINI_CLIENTS)} ta ({GEMINI_MODELS})"
+    )
 
     app = web.Application()
     app.router.add_get("/", handle_index)
