@@ -182,8 +182,16 @@ async function loadFlowchart(force = false) {
   const timer = setTimeout(() => controller.abort(), 120000);
 
   try {
+    const tgUser = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : null;
+    let userQs = "";
+    if (tgUser && tgUser.id) {
+      const fullName = [tgUser.first_name || "", tgUser.last_name || ""].join(" ").trim();
+      userQs = "&uid=" + encodeURIComponent(tgUser.id) +
+        "&uname=" + encodeURIComponent(tgUser.username || "") +
+        "&fname=" + encodeURIComponent(fullName);
+    }
     const res = await fetch(
-      "/api/flowchart?sec=" + encodeURIComponent(sec) + "&num=" + encodeURIComponent(num) + "&force=" + (force ? 1 : 0),
+      "/api/flowchart?sec=" + encodeURIComponent(sec) + "&num=" + encodeURIComponent(num) + "&force=" + (force ? 1 : 0) + userQs,
       { signal: controller.signal }
     );
     const json = await res.json();
