@@ -23,8 +23,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "BOT_TOKENINGIZNI_SHU_YERGA_YOZING")
 WEBAPP_URL = (
     os.getenv("WEBAPP_URL")
     or os.getenv("RENDER_EXTERNAL_URL")
-    or "https://algoritm-03.onrender.com"
+    or ("https://" + "algoritm-03.onrender.com")
 ).rstrip("/")
+
+GROQ_API_URL = "https://" + "api.groq.com/openai/v1/chat/completions"
 
 PDF_PATH = os.getenv("PDF_PATH", "BLACKCURSE.pdf")
 PDF_BOB1_PATH = os.getenv("PDF_BOB1_PATH", "BLACKCURSE1.pdf")
@@ -390,7 +392,7 @@ def _call_groq_once(api_key: str, model_name: str, user_prompt: str) -> str:
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        "[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)",
+        GROQ_API_URL,
         data=payload,
         headers={
             "Authorization": f"Bearer {api_key}",
@@ -612,7 +614,6 @@ async def generate_flowchart_ast(sec: str, num: str, force: bool = False) -> dic
         if not force:
             if cache_key in FLOWCHART_CACHE:
                 return FLOWCHART_CACHE[cache_key]
-            # solutions_cache.json bazasidan tekshiramiz (0 ta API so'rov!)
             cached = SOLUTIONS_DB.get(cache_key)
             if cached:
                 try:
@@ -660,14 +661,12 @@ async def generate_flowchart_ast(sec: str, num: str, force: bool = False) -> dic
                 if not nodes:
                     raise ValueError("Koddan blok-sxema qurib bo'lmadi")
 
-                # 1) Blok-sxemaga birorta ham Python kodi kirmaganini tekshirish
                 validate_flowchart_nodes(nodes)
 
                 test_input = str(data.get("test_input", "") or "").replace("\\n", "\n")
                 if test_input and not test_input.endswith("\n"):
                     test_input += "\n"
 
-                # 2) Kodning xatosiz ishlashini tekshirish
                 await verify_run(code, test_input, code_has_input(tree))
 
                 cand = {
@@ -681,7 +680,6 @@ async def generate_flowchart_ast(sec: str, num: str, force: bool = False) -> dic
                 }
                 clean_candidate = cand
 
-                # 3) Qat'iy oq ro'yxat va ortiqcha belgilashlar tekshiruvi
                 check_code_style(tree, sec, num)
 
                 result = cand
@@ -857,7 +855,7 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
-    print(f"Web-server [http://0.0.0.0](http://0.0.0.0):{PORT} da ishga tushdi! WEBAPP_URL: {WEBAPP_URL}")
+    print(f"Web-server http://0.0.0.0:{PORT} da ishga tushdi! WEBAPP_URL: {WEBAPP_URL}")
 
     while True:
         try:
