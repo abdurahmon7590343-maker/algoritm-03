@@ -36,7 +36,12 @@ SOLUTIONS_CACHE_FILE = os.getenv("SOLUTIONS_CACHE_FILE", "solutions_cache.json")
 PORT = int(os.getenv("PORT", 8080))
 
 # --- GROQ API (katta bepul limitli asosiy provayder) ---
-_raw_groq_keys = os.getenv("GROQ_API_KEYS") or os.getenv("GROQ_API_KEY", "")
+_raw_groq_keys = (
+    os.getenv("GROQ_API_KEYS")
+    or os.getenv("GROQ_API_KEY")
+    or os.getenv("GROQ_KEY")
+    or ""
+)
 GROQ_API_KEYS = [k.strip() for k in _raw_groq_keys.split(",") if k.strip()]
 
 _raw_groq_models = os.getenv("GROQ_MODELS") or os.getenv(
@@ -289,6 +294,12 @@ def clean_json_text(raw_text: str) -> str:
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
+    text = text.strip()
+    if not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end > start:
+            text = text[start:end + 1]
     return text.strip()
 
 
@@ -308,7 +319,7 @@ def ensure_input_prompts(code: str) -> str:
 
 SYSTEM_PROMPT = r"""
 Sen universitet talabasi daftariga yozgandek ENG TOZA, SODDA va 100% KODSIZ blok-sxemaga aylanadigan matematik Python kodi yozuvchi ustozsan.
-Faqat sof JSON qaytar:
+Faqat sof JSON qaytar (boshqa matn yozma):
 {"explanation": "...", "input_format": "...", "test_input": "...", "code_python": "..."}
 
 QAT'IY QOIDALAR:
@@ -368,6 +379,11 @@ QAT'IY QOIDALAR:
 """
 
 
+class AllProvidersFailedError(RuntimeError):
+    """Barcha AI provayderlar (Groq va Gemini) javob bera olmaganda chiqadi."""
+    pass
+
+
 def _is_quota_error(err: Exception) -> bool:
     msg = str(err)
     return (
@@ -375,12 +391,11 @@ def _is_quota_error(err: Exception) -> bool:
         or "RESOURCE_EXHAUSTED" in msg
         or "Quota exceeded" in msg
         or "rate_limit" in msg.lower()
-        or "kunlik limiti tugadi" in msg
     )
 
 
-def _call_groq_once(api_key: str, model_name: str, user_prompt: str) -> str:
-    payload = json.dumps({
+def _call_groq_once(api_key: str, model_name: str, user_prompt: str, force_json: bool = True) -> str:
+    body_obj = {
         "model": model_name,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -388,9 +403,11 @@ def _call_groq_once(api_key: str, model_name: str, user_prompt: str) -> str:
         ],
         "temperature": 0.1,
         "max_tokens": 4096,
-        "response_format": {"type": "json_object"},
-    }).encode("utf-8")
+    }
+    if force_json:
+        body_obj["response_format"] = {"type": "json_object"}
 
+    payload = json.dumps(body_obj).encode("utf-8")
     req = urllib.request.Request(
         GROQ_API_URL,
         data=payload,
@@ -408,69 +425,79 @@ def _call_groq_once(api_key: str, model_name: str, user_prompt: str) -> str:
     except urllib.error.HTTPError as e:
         err_body = ""
         try:
-            err_body = e.read().decode("utf-8", errors="ignore")[:300]
+            err_body = e.read().decode("utf-8", errors="ignore")[:240]
         except Exception:
             pass
+        # Groq json_validate_failed (HTTP 400) bersa, response_format'siz 1 marta qayta urinamiz
+        if e.code == 400 and force_json and "json_validate_failed" in err_body:
+            return _call_groq_once(api_key, model_name, user_prompt, force_json=False)
         raise RuntimeError(f"Groq HTTP {e.code}: {err_body}")
 
 
 def _call_ai(user_prompt: str) -> str:
-    """Avval Groq (katta bepul limit), u bo'lmasa yoki tugasa Gemini ishlatadi."""
+    """Avval Groq (katta bepul limit), u bo'lmasa yoki xato bersa Gemini ishlatadi."""
     global _groq_key_idx, _gemini_key_idx
     if not GROQ_API_KEYS and not _GEMINI_CLIENTS:
-        raise RuntimeError("GROQ_API_KEY yoki GEMINI_API_KEY sozlanmagan")
+        raise AllProvidersFailedError("Render'da GROQ_API_KEY ham, GEMINI_API_KEY ham kiritilmagan.")
 
-    last_err = None
+    diagnostics = []
 
     # 1) GROQ API
-    for model_name in GROQ_MODELS:
-        for step in range(len(GROQ_API_KEYS)):
-            idx = (_groq_key_idx + step) % len(GROQ_API_KEYS)
-            try:
-                text = _call_groq_once(GROQ_API_KEYS[idx], model_name, user_prompt)
-                _groq_key_idx = idx
-                return text
-            except Exception as e:
-                last_err = e
-                msg = str(e)
-                if _is_quota_error(e) or "404" in msg or "400" in msg or "401" in msg or "503" in msg:
-                    print(f"Groq o'tkazildi: kalit #{idx + 1}, model={model_name} ({msg[:120]})")
+    if not GROQ_API_KEYS:
+        diagnostics.append("Groq: kalit kiritilmagan (GROQ_API_KEY bo'sh)")
+    else:
+        groq_last = ""
+        for model_name in GROQ_MODELS:
+            for step in range(len(GROQ_API_KEYS)):
+                idx = (_groq_key_idx + step) % len(GROQ_API_KEYS)
+                try:
+                    text = _call_groq_once(GROQ_API_KEYS[idx], model_name, user_prompt)
+                    _groq_key_idx = idx
+                    return text
+                except Exception as e:
+                    groq_last = f"{model_name}: {str(e)[:140]}"
+                    print(f"Groq o'tkazildi (kalit #{idx + 1}, {model_name}): {e}")
                     continue
-                raise
+        if groq_last:
+            diagnostics.append(f"Groq xatosi -> {groq_last}")
 
     # 2) GEMINI API (zaxira)
-    full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
-    for model_name in GEMINI_MODELS:
-        for step in range(len(_GEMINI_CLIENTS)):
-            idx = (_gemini_key_idx + step) % len(_GEMINI_CLIENTS)
-            client = _GEMINI_CLIENTS[idx]
-            cfg = dict(
-                response_mime_type="application/json",
-                temperature=0.1,
-                max_output_tokens=8192,
-            )
-            if "2.5" in model_name and "lite" not in model_name:
-                try:
-                    cfg["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=2048)
-                except Exception:
-                    pass
-            try:
-                resp = client.models.generate_content(
-                    model=model_name,
-                    contents=full_prompt,
-                    config=genai_types.GenerateContentConfig(**cfg)
+    if not _GEMINI_CLIENTS:
+        diagnostics.append("Gemini: kalit kiritilmagan")
+    else:
+        full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
+        gemini_last = ""
+        for model_name in GEMINI_MODELS:
+            for step in range(len(_GEMINI_CLIENTS)):
+                idx = (_gemini_key_idx + step) % len(_GEMINI_CLIENTS)
+                client = _GEMINI_CLIENTS[idx]
+                cfg = dict(
+                    response_mime_type="application/json",
+                    temperature=0.1,
+                    max_output_tokens=8192,
                 )
-                _gemini_key_idx = idx
-                return resp.text
-            except Exception as e:
-                last_err = e
-                msg = str(e)
-                if _is_quota_error(e) or "404" in msg or "NOT_FOUND" in msg:
-                    print(f"Gemini o'tkazildi: kalit #{idx + 1}, model={model_name} ({type(e).__name__})")
+                if "2.5" in model_name and "lite" not in model_name:
+                    try:
+                        cfg["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=2048)
+                    except Exception:
+                        pass
+                try:
+                    resp = client.models.generate_content(
+                        model=model_name,
+                        contents=full_prompt,
+                        config=genai_types.GenerateContentConfig(**cfg)
+                    )
+                    _gemini_key_idx = idx
+                    return resp.text
+                except Exception as e:
+                    short_e = "429 limit tugadi" if _is_quota_error(e) else str(e)[:120]
+                    gemini_last = f"{model_name}: {short_e}"
+                    print(f"Gemini o'tkazildi (kalit #{idx + 1}, {model_name}): {short_e}")
                     continue
-                raise
+        if gemini_last:
+            diagnostics.append(f"Gemini xatosi -> {gemini_last}")
 
-    raise RuntimeError(f"Barcha API kalit va modellarning kunlik limiti tugadi: {last_err}")
+    raise AllProvidersFailedError(" | ".join(diagnostics))
 
 
 # ================= QAT'IY OQ RO'YXAT TEKSHIRUVI =================
@@ -684,11 +711,13 @@ async def generate_flowchart_ast(sec: str, num: str, force: bool = False) -> dic
 
                 result = cand
                 break
+            except AllProvidersFailedError as e:
+                last_err = e
+                print(f"Barcha AI provayderlar ishlamadi: {e}")
+                break
             except Exception as e:
                 last_err = e
                 print(f"Generatsiya xatosi (urinish {attempt + 1}): {e}")
-                if _is_quota_error(e):
-                    break
                 extra = (
                     f"\nOLDINGI JAVOBDA XATO BO'LDI: {e}\n"
                     f"Xatoni 100% tuzat: ord/chr/metodlar va ortiqcha o'zgaruvchilarsiz toza matematik kod qaytar.\n"
@@ -699,8 +728,8 @@ async def generate_flowchart_ast(sec: str, num: str, force: bool = False) -> dic
             result = clean_candidate
 
         if result is None:
-            if last_err is not None and _is_quota_error(last_err):
-                raise RuntimeError("API kunlik limiti tugadi. Render'da GROQ_API_KEY yoki GEMINI_API_KEYS ni tekshiring.")
+            if isinstance(last_err, AllProvidersFailedError):
+                raise RuntimeError(f"AI ulanish xatosi: {last_err}")
             raise RuntimeError(f"Toza blok-sxema yaratib bo'lmadi (qayta urining): {last_err}")
 
         FLOWCHART_CACHE[cache_key] = result
@@ -822,6 +851,17 @@ async def handle_health(request):
     return web.Response(text="OK")
 
 
+async def handle_status(request):
+    return web.json_response({
+        "groq_keys": len(GROQ_API_KEYS),
+        "groq_models": GROQ_MODELS,
+        "gemini_keys": len(_GEMINI_CLIENTS),
+        "gemini_models": GEMINI_MODELS,
+        "cached_solutions": len(SOLUTIONS_DB),
+        "total_problems": sum(len(v) for v in PROBLEMS_DB.values()),
+    })
+
+
 async def handle_api_problems(request):
     return web.json_response({"sections": SECTION_NAMES, "problems": PROBLEMS_DB})
 
@@ -848,6 +888,7 @@ async def main():
     app = web.Application()
     app.router.add_get("/", handle_index)
     app.router.add_get("/health", handle_health)
+    app.router.add_get("/api/status", handle_status)
     app.router.add_get("/api/problems", handle_api_problems)
     app.router.add_get("/api/flowchart", handle_api_flowchart)
 
