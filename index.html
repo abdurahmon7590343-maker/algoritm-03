@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Blok-Sxema Mini App</title>
-<script src="[https://telegram.org/js/telegram-web-app.js](https://telegram.org/js/telegram-web-app.js)"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #38bdf8; }
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
@@ -376,7 +376,12 @@ function measureNode(node) {
   const kind = known.includes(t) ? t : "assign";
   const maxC = kind === "assign" ? 28 : 24;
   const lines = wrapWords(node.text || node.condition || "", maxC);
-  const h = kind === "terminal" ? NODE_H : Math.max(NODE_H, lines.length * 17 + 22);
+  let h = NODE_H;
+  if (kind === "output") {
+    h = Math.max(NODE_H + 8, lines.length * 17 + 30);
+  } else if (kind !== "terminal") {
+    h = Math.max(NODE_H, lines.length * 17 + 22);
+  }
   const half = (NODE_W + 20) / 2;
   return { type: kind, node, lines, leftW: half, rightW: half, width: NODE_W + 20, height: h };
 }
@@ -431,12 +436,24 @@ function renderFlowgorithmSVG(nodes) {
       out.push('<rect x="' + (x + 35) + '" y="' + y + '" width="' + (NODE_W - 70) + '" height="' + m.height + '" rx="27" ry="27" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
       drawLines(cx, y + m.height / 2, m.lines, c.text);
     }
-    else if (m.type === "input" || m.type === "output") {
-      const c = m.type === "input" ? COLORS.input : COLORS.output;
+    else if (m.type === "input") {
+      const c = COLORS.input;
       const sk = 18;
       const pts = (x + sk) + "," + y + " " + (x + NODE_W) + "," + y + " " + (x + NODE_W - sk) + "," + (y + m.height) + " " + x + "," + (y + m.height);
       out.push('<polygon points="' + pts + '" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
       drawLines(cx, y + m.height / 2, m.lines, c.text);
+    }
+    else if (m.type === "output") {
+      // Natijani chiqarish (Hujjat / GOST): pastki o'ng tomoni oysimon qirqilgan to'rtburchak
+      const c = COLORS.output;
+      const bottomY = y + m.height;
+      const d = "M " + x + "," + y +
+        " L " + (x + NODE_W) + "," + y +
+        " L " + (x + NODE_W) + "," + (bottomY - 12) +
+        " Q " + (x + NODE_W * 0.75) + "," + (bottomY - 15) + " " + cx + "," + bottomY +
+        " T " + x + "," + (bottomY - 4) + " Z";
+      out.push('<path d="' + d + '" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
+      drawLines(cx, y + (m.height - 8) / 2, m.lines, c.text);
     }
     else if (m.type === "if") {
       const c = COLORS.if;
@@ -523,7 +540,7 @@ function renderFlowgorithmSVG(nodes) {
 
   renderSeq(tree, startCx, 24);
 
-  return '<svg id="flow-svg" xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="' + svgW + '" height="' + svgH + '" viewBox="0 0 ' + svgW + ' ' + svgH + '">' +
+  return '<svg id="flow-svg" xmlns="http://www.w3.org/2000/svg" width="' + svgW + '" height="' + svgH + '" viewBox="0 0 ' + svgW + ' ' + svgH + '">' +
     '<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">' +
     '<path d="M 0 1 L 10 5 L 0 9 z" fill="#334155"/></marker></defs>' +
     '<rect width="100%" height="100%" fill="#f8fafc"/>' +
