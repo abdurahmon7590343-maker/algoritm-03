@@ -376,12 +376,7 @@ function measureNode(node) {
   const kind = known.includes(t) ? t : "assign";
   const maxC = kind === "assign" ? 28 : 24;
   const lines = wrapWords(node.text || node.condition || "", maxC);
-  let h = NODE_H;
-  if (kind === "output") {
-    h = Math.max(NODE_H + 8, lines.length * 17 + 30);
-  } else if (kind !== "terminal") {
-    h = Math.max(NODE_H, lines.length * 17 + 22);
-  }
+  const h = kind === "terminal" ? NODE_H : Math.max(NODE_H, lines.length * 17 + 22);
   const half = (NODE_W + 20) / 2;
   return { type: kind, node, lines, leftW: half, rightW: half, width: NODE_W + 20, height: h };
 }
@@ -444,16 +439,18 @@ function renderFlowgorithmSVG(nodes) {
       drawLines(cx, y + m.height / 2, m.lines, c.text);
     }
     else if (m.type === "output") {
-      // Natijani chiqarish (Hujjat / GOST): pastki o'ng tomoni oysimon qirqilgan to'rtburchak
+      // Natijani chiqarish: to'rtburchakning faqat pastki o'ng burchagi oysimon qirqilgan
       const c = COLORS.output;
       const bottomY = y + m.height;
+      const rx = 30;
+      const ry = Math.min(24, Math.floor(m.height * 0.45));
       const d = "M " + x + "," + y +
         " L " + (x + NODE_W) + "," + y +
-        " L " + (x + NODE_W) + "," + (bottomY - 12) +
-        " Q " + (x + NODE_W * 0.75) + "," + (bottomY - 15) + " " + cx + "," + bottomY +
-        " T " + x + "," + (bottomY - 4) + " Z";
+        " L " + (x + NODE_W) + "," + (bottomY - ry) +
+        " A " + rx + " " + ry + " 0 0 0 " + (x + NODE_W - rx) + "," + bottomY +
+        " L " + x + "," + bottomY + " Z";
       out.push('<path d="' + d + '" fill="' + c.fill + '" stroke="' + c.stroke + '" stroke-width="2.3"/>');
-      drawLines(cx, y + (m.height - 8) / 2, m.lines, c.text);
+      drawLines(cx, y + m.height / 2, m.lines, c.text);
     }
     else if (m.type === "if") {
       const c = COLORS.if;
